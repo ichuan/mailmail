@@ -83,6 +83,12 @@ impl Db {
             .execute(&self.pool)
             .await;
 
+        // Clean up rows where uid=0, which were created by a bug where FETCH without
+        // explicit UID data item caused msg.uid to always be None. IMAP UIDs start at 1.
+        let _ = sqlx::query("DELETE FROM emails WHERE uid = 0")
+            .execute(&self.pool)
+            .await;
+
         Ok(())
     }
 
