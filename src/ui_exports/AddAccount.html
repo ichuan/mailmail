@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Essentialist Mail - Add Account</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "background": "#f9f9f9",
+                    "surface-container": "#eeeeee",
+                    "on-secondary-fixed-variant": "#30476a",
+                    "on-background": "#1a1c1c",
+                    "on-primary-fixed-variant": "#004787",
+                    "primary-fixed-dim": "#a6c8ff",
+                    "secondary-container": "#bed6ff",
+                    "tertiary-fixed": "#ffdbc9",
+                    "primary": "#004f96",
+                    "error": "#ba1a1a",
+                    "on-primary": "#ffffff",
+                    "secondary-fixed-dim": "#b0c8f0",
+                    "surface-container-highest": "#e2e2e2",
+                    "surface-variant": "#e2e2e2",
+                    "outline-variant": "#c1c6d4",
+                    "error-container": "#ffdad6",
+                    "on-tertiary-fixed": "#331200",
+                    "on-error-container": "#93000a",
+                    "secondary": "#485f83",
+                    "surface": "#f9f9f9",
+                    "on-tertiary": "#ffffff",
+                    "on-surface": "#1a1c1c",
+                    "on-secondary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#763300",
+                    "inverse-primary": "#a6c8ff",
+                    "tertiary": "#833900",
+                    "on-secondary-container": "#465c80",
+                    "surface-dim": "#dadada",
+                    "surface-container-high": "#e8e8e8",
+                    "primary-container": "#0067c0",
+                    "surface-container-low": "#f3f3f3",
+                    "secondary-fixed": "#d5e3ff",
+                    "on-tertiary-container": "#ffe0d1",
+                    "on-primary-container": "#dbe7ff",
+                    "inverse-surface": "#2f3131",
+                    "on-secondary-fixed": "#001c3b",
+                    "on-surface-variant": "#414752",
+                    "inverse-on-surface": "#f1f1f1",
+                    "tertiary-fixed-dim": "#ffb68d",
+                    "surface-bright": "#f9f9f9",
+                    "on-primary-fixed": "#001c3b",
+                    "tertiary-container": "#a84c00",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed": "#d5e3ff",
+                    "outline": "#717783",
+                    "surface-tint": "#005eb1",
+                    "on-error": "#ffffff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Inter"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f9f9f9;
+        }
+        .mica-sidebar {
+            backdrop-filter: blur(20px);
+        }
+    </style>
+</head>
+<body class="text-on-surface overflow-hidden">
+<!-- Sidebar (Shared Component SideNavBar) -->
+<aside class="fixed left-0 top-0 h-full flex flex-col py-8 px-6 bg-[#f3f3f3] dark:bg-slate-900/70 backdrop-blur-xl h-screen w-72 flex-shrink-0 font-['Inter'] antialiased text-sm tracking-tight z-10">
+<div class="mb-10 px-2 flex items-center gap-3">
+<div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-lg">mail</span>
+</div>
+<h1 class="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">Essentialist Mail</h1>
+</div>
+<nav class="flex-grow space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="inbox">inbox</span>
+<span>Inbox</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="draft">draft</span>
+<span>Drafts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="send">send</span>
+<span>Sent</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="archive">archive</span>
+<span>Archive</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="report">report</span>
+<span>Spam</span>
+</a>
+</nav>
+<div class="mt-auto space-y-1">
+<div class="px-3 mb-4 flex items-center gap-3">
+<img alt="User Profile" class="w-8 h-8 rounded-full bg-surface-container-highest" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD8-KDyCcuVTFu9JH_epUS4OyEnki81z_mrXZDfSmzrFKvW4NrdC2BYy-OSCiWc1q83MaI_DDrZgGL8LWqi_yME4Vxjl5M6DsT1XSbfNBaJz6aG5xonQMCpWQm57EZp6C5mBlIWTqowOa-YL5poCnlYv0NUO5P4t4zpUQ8RsR3KB6BGTSu4Y0dJCifmlNIOcYPnlRY-jLTuLgkOeScWQtDXxIM5h7TenZ_JZPmx1esfCnfA5ZEf4Fy2KbYcTv4AJCYLdw4JGkYC-Tbs"/>
+<div class="flex flex-col">
+<span class="text-xs font-semibold text-slate-900">alex@essentialist.com</span>
+</div>
+</div>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-[#e2e2e2] dark:hover:bg-slate-800 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="manage_accounts">manage_accounts</span>
+<span>Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-[#d5e3ff] dark:bg-[#004f96]/30 text-[#004f96] dark:text-[#d5e3ff] font-semibold rounded-lg relative before:absolute before:left-[-12px] before:top-1/4 before:h-1/2 before:w-1.5 before:bg-[#0067C0] before:rounded-r-full" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+</div>
+</aside>
+<!-- Main Dashboard Content (Mocking Settings Page) -->
+<main class="ml-72 min-h-screen bg-surface">
+<!-- Top Nav Bar (Shared Component TopNavBar) -->
+<header class="flex items-center justify-end px-12 w-full h-16 bg-transparent font-['Inter'] text-sm">
+<div class="flex items-center gap-6">
+<button class="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-all duration-200">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+<button class="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-all duration-200">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<img alt="Alex's Account" class="w-8 h-8 rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCNwZYa861G7STWEDqsw-AeE3gH24HTKFgVmRc2hx-D3YjFfMaF-BOpYnzuKHRxKeBVjy9gzvdXeES5j1e0-B1l7P5q3SpgD6JyZtX_u41o0h-r7ZiCi_1BtfP-3fexDGX8lBz43A6mt7z8vk3oyTwEST7y3HMTpfiYubwsrjRF-jctAr8A45Wnxx7ftgb0uDrylcH9ldwriMREwoQkndGNRrSziVctgiAK22negqMU0dxT24VyE8Bv-kATPN1AqXcTIXgq_uhfHADY"/>
+</div>
+</header>
+<!-- Page Content -->
+<div class="max-w-5xl mx-auto px-12 py-12">
+<div class="mb-12">
+<h2 class="text-4xl font-bold tracking-tight text-on-surface mb-2">Settings</h2>
+<p class="text-on-surface-variant body-md">Manage your workspace and personal configurations.</p>
+</div>
+<!-- Settings Content Grid (Bento Style) -->
+<div class="grid grid-cols-12 gap-6">
+<div class="col-span-8 bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+<h3 class="text-xl font-semibold mb-6">General Preferences</h3>
+<div class="space-y-6">
+<div class="flex items-center justify-between py-2">
+<div>
+<p class="font-medium">Dark Mode</p>
+<p class="text-sm text-on-surface-variant">Switch between light and dark themes.</p>
+</div>
+<div class="w-12 h-6 bg-surface-container-highest rounded-full p-1 cursor-pointer">
+<div class="w-4 h-4 bg-white rounded-full shadow-sm"></div>
+</div>
+</div>
+<div class="flex items-center justify-between py-2">
+<div>
+<p class="font-medium">Push Notifications</p>
+<p class="text-sm text-on-surface-variant">Get notified for new emails immediately.</p>
+</div>
+<div class="w-12 h-6 bg-primary rounded-full p-1 cursor-pointer flex justify-end">
+<div class="w-4 h-4 bg-white rounded-full shadow-sm"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="col-span-4 space-y-6">
+<div class="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+<h3 class="font-semibold mb-4">Storage Usage</h3>
+<div class="h-2 w-full bg-surface-container-highest rounded-full mb-2">
+<div class="h-full w-[65%] bg-primary rounded-full"></div>
+</div>
+<p class="text-xs text-on-surface-variant">9.8 GB of 15 GB used</p>
+</div>
+<div class="bg-primary-fixed rounded-xl p-6 shadow-sm border border-outline-variant/10">
+<h3 class="font-semibold text-on-primary-fixed-variant mb-2">Essentialist Pro</h3>
+<p class="text-sm text-on-secondary-fixed-variant mb-4">Unlock advanced filtering and 100GB storage.</p>
+<button class="w-full py-2 bg-primary text-white rounded-lg font-medium text-sm">Upgrade Now</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- ADD ACCOUNT OVERLAY (Digital Atheneum Modal) -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-6">
+<!-- Backdrop -->
+<div class="absolute inset-0 bg-on-surface/10 backdrop-blur-md"></div>
+<!-- Modal Container -->
+<div class="relative w-full max-w-2xl bg-surface rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] overflow-hidden flex flex-col md:flex-row">
+<!-- Modal Left: Illustration/Branding -->
+<div class="w-full md:w-5/12 bg-surface-container-low p-10 flex flex-col justify-between items-start">
+<div>
+<span class="material-symbols-outlined text-primary text-4xl mb-4" data-icon="add_circle">add_circle</span>
+<h2 class="text-3xl font-bold tracking-tight text-on-surface leading-tight">Connect your world.</h2>
+</div>
+<p class="text-sm text-on-surface-variant leading-relaxed">
+                    Essentialist Mail centralizes your communication into a single, serene environment. Choose your provider to begin.
+                </p>
+<div class="mt-8">
+<div class="flex -space-x-2">
+<img alt="Google" class="w-8 h-8 rounded-full ring-2 ring-surface" data-alt="Official Google brand logo icon in a circular format with soft shadows" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAsCZa-IUHvp3GYzkacXvHM9GX1Eab6PRSUkTiLuep9EiHcwBSm4RILJgqFdyk8kBgw6y9rvMsLTV1bXumBkLFfkSVxOUB4eVQcNMBKY2Chyu7XzV3vb4qTdBZ7sP2356XxnwhMyh4RxV8K1_TlNsJO7qa5ps4AqYyHLcLomfOrYWIl2MMNHtPZgnqypTU70G36fu4vZlwM806n2T_rVvr9XkWR_ccJux0U8u3Yeg-pirF65tyaA1IdG3atlzZxIniBN7cZveQHw1Kb"/>
+<img alt="Outlook" class="w-8 h-8 rounded-full ring-2 ring-surface" data-alt="Microsoft Outlook blue envelope icon representing professional email connectivity" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnYFb2t2-C8DAy0_7XDC3ZE7vQoTWOBv-eHbpJ29O0bfVNTeEfExLsWVBY2ig2HILf2z5iPqcHVRQoTlPpSaJEYUHnxNyljza3CrSC5TWG-k9iHuLJFuke9-M8VeVwtNe_NprApmfrcG98I1vLmmQ5vC9vJR1YS394lqmxMW9vgZOWX35D5omohzfmhJog3yRYFsWPolr0PSyfTmNJjCQsN26l87tblXnzH0SXUZNCV6bKWStJrB9ys9gGqZAb5n9ob2Aya1O5Zlgh"/>
+<img alt="Apple" class="w-8 h-8 rounded-full ring-2 ring-surface" data-alt="Minimalist Apple iCloud logo in silver monochromatic style for tech-focused user interface" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAWOfkzpGwj-fMeqHT0uCspP3ZAfVUoi47yGHddpxxYSc-tPg2fUhI_UMwTIpwM6WU9OlfBkLo_DL7r6my4saGVD8-RfptyTHc41hfeR_EltawaD6PFwkVRaRFoR-qTBhtKygI-KNzCzfymn-R1DJWT1_2ZY_x6UiEhJlPvtKIDJQVd9V7x63CHUYkqmej3nuzc59a-hlnsnphs-fY0xT1Du534BCveepLYoLSqDVf2hlbM7RqfomXsCHjnPRQtFKZH-NU_QPnq_b7G"/>
+</div>
+</div>
+</div>
+<!-- Modal Right: Content -->
+<div class="w-full md:w-7/12 bg-surface-container-lowest p-10">
+<div class="flex justify-end mb-6">
+<button class="text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+<div class="space-y-4">
+<h3 class="label-md uppercase tracking-widest text-on-surface-variant font-semibold mb-6">Choose Provider</h3>
+<!-- Option: Google -->
+<button class="w-full flex items-center justify-between p-4 rounded-xl border border-outline-variant/30 hover:bg-surface-container-low hover:border-primary/20 transition-all group">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="google" style="font-variation-settings: 'FILL' 0;">mail</span>
+</div>
+<span class="font-medium text-on-surface">Google</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</button>
+<!-- Option: Microsoft Outlook -->
+<button class="w-full flex items-center justify-between p-4 rounded-xl border border-outline-variant/30 hover:bg-surface-container-low hover:border-primary/20 transition-all group">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="work" style="font-variation-settings: 'FILL' 0;">work</span>
+</div>
+<span class="font-medium text-on-surface">Microsoft Outlook</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</button>
+<!-- Option: iCloud -->
+<button class="w-full flex items-center justify-between p-4 rounded-xl border border-outline-variant/30 hover:bg-surface-container-low hover:border-primary/20 transition-all group">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="cloud" style="font-variation-settings: 'FILL' 0;">cloud</span>
+</div>
+<span class="font-medium text-on-surface">iCloud</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</button>
+<!-- Option: Other -->
+<button class="w-full flex items-center justify-between p-4 rounded-xl border border-outline-variant/30 hover:bg-surface-container-low hover:border-primary/20 transition-all group">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="settings_input_component" style="font-variation-settings: 'FILL' 0;">settings_input_component</span>
+</div>
+<span class="font-medium text-on-surface">Other (IMAP/SMTP)</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+<div class="mt-8 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-outline text-xs" data-icon="lock">lock</span>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Secure OAuth 2.0 Encryption</p>
+</div>
+</div>
+</div>
+</div>
+</body></html>
