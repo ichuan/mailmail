@@ -127,7 +127,10 @@ export default function App() {
           setSyncing(true);
           const limit = savedLimit ? Number(savedLimit) : syncLimitDays;
           const freshEmails = await syncAllAccounts(loadedAccounts, limit, 'inbox');
-          setEmails(freshEmails);
+          // IMAP always returns read=false; preserve what the cache already marked as read
+          const { emails: memEmails } = useMailStore.getState();
+          const readIds = new Set(memEmails.filter(e => e.read).map(e => e.id));
+          setEmails(freshEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e));
           setSyncing(false);
         }
       } catch (err) {
@@ -156,7 +159,10 @@ export default function App() {
         } catch (_) { /* skip */ }
       }
       if (!cancelled && cachedAll.length > 0) {
-        const otherEmails = emails.filter(e => e.folder !== selectedFolder);
+        // Use fresh store state to avoid stale-closure bugs and preserve read flags
+        // (cache rows always reflect DB is_read, which is correct after the mark_email_read fix)
+        const { emails: cur } = useMailStore.getState();
+        const otherEmails = cur.filter(e => e.folder !== selectedFolder);
         setEmails([...otherEmails, ...cachedAll]);
       }
 
@@ -165,8 +171,11 @@ export default function App() {
       try {
         const folderEmails = await syncAllAccounts(accounts, syncLimitDays, selectedFolder);
         if (!cancelled) {
-          const otherEmails = emails.filter(e => e.folder !== selectedFolder);
-          setEmails([...otherEmails, ...folderEmails]);
+          // IMAP results have read=false; preserve in-memory read state
+          const { emails: cur } = useMailStore.getState();
+          const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
+          const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
+          setEmails([...cur.filter(e => e.folder !== selectedFolder), ...merged]);
         }
       } catch (err) {
         console.error("Folder sync error:", err);
@@ -200,8 +209,11 @@ export default function App() {
     setSyncing(true);
     try {
       const folderEmails = await syncAllAccounts(accounts, syncLimitDays, selectedFolder);
-      const otherEmails = emails.filter(e => e.folder !== selectedFolder);
-      setEmails([...otherEmails, ...folderEmails]);
+      // Preserve in-memory read state: IMAP always returns read=false
+      const { emails: cur } = useMailStore.getState();
+      const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
+      const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
+      setEmails([...cur.filter(e => e.folder !== selectedFolder), ...merged]);
     } catch (err) {
       console.error("Manual sync error:", err);
     } finally {
@@ -243,6 +255,15 @@ export default function App() {
       console.error("Failed to delete email:", err);
     }
   };
+
+  // Persist read state to DB so it survives folder switches and app restarts.
+  // selectEmail() only updates in-memory; this call syncs the DB.
+  const handleSelectEmail = useCallback((id: string) => {
+    selectEmail(id);
+    invoke('mark_email_read', { id, read: true }).catch(err =>
+      console.warn('Failed to persist read state:', err)
+    );
+  }, [selectEmail]);
 
   // Debounced search: update query after 300ms of no input
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -378,7 +399,7 @@ export default function App() {
               {displayEmails.map(email => (
                 <div
                   key={email.id}
-                  onClick={() => selectEmail(email.id)}
+                  onClick={() => handleSelectEmail(email.id)}
                   className={cx(
                     "p-4 border-b border-[#f1f1f1] cursor-pointer hover:bg-[#f3f3f3] transition-colors relative",
                     selectedEmailId === email.id ? "bg-[#d5e3ff] hover:bg-[#d5e3ff]" : ""
