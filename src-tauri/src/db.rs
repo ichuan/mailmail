@@ -177,6 +177,7 @@ impl Db {
             INSERT INTO emails (id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+                id = excluded.id,
                 sender = excluded.sender,
                 sender_email = excluded.sender_email,
                 recipient = excluded.recipient,
