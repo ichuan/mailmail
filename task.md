@@ -1,0 +1,22 @@
+# MailMail Task List
+
+- `[x]` Phase 1: UI Design & Prototyping
+  - `[x]` Generate Apple Mail replica UI using Stitch MCP.
+  - `[x]` Review Stitch screen outputs with the user.
+- `[x]` Phase 2: Project Initialization
+  - `[x]` Bootstrap Tauri App (React + TypeScript + Vite).
+  - `[x]` Install Tailwind CSS v4, Lucide Icons, and Zustand.
+  - `[x]` Clean up default boilerplate.
+- `[x]` Phase 3: Rust Backend & Core Logic
+  - `[x]` Database Layer: Set up SQLite (`sqlx`) & schema for IMAP headers/body cache.
+  - `[x]` IMAP Layer: Implement `async-imap` for connection, fetching headers, and IDLE push notifications.
+  - `[x]` SMTP Layer: Implemented stubs/models for configuration.
+  - `[x]` Security Layer: Implement robust HTML sanitization (`ammonia` crate) to parse and clean raw HTML email bodies, removing malicious scripts, web bugs, and trackers.
+  - `[x]` Windows Integration: Configured Tauri for minimal OS footprint.
+- `[x]` Phase 4: Frontend Development
+  - `[x]` Three-Pane Layout: Implement standard Apple Mail structure (Sidebar, Mail List, View).
+  - `[x]` Implement secure HTML rendering and plaintext fallback.
+  - `[x]` Zustand mock mapping for unified inbox structure.
+- `[x]` Phase 5: Verification & Polish
+  - `[x]` Verified Front-End Vite Build compilation.
+  - `[x]` Verified Rust dependency structure.
