@@ -183,11 +183,15 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
 
             let preview = body_text.chars().take(100).collect::<String>();
 
+            let uid = msg.uid.unwrap_or(0);
             emails.push(Email {
-                id: uuid::Uuid::new_v4().to_string(),
+                // Deterministic ID prevents the same email getting a new ID
+                // on every background sync, which would orphan selectedEmailId
+                // and wipe the readIds Set in the frontend.
+                id: format!("{}_{}_{}" , account.id, folder.to_lowercase(), uid),
                 account_id: account.id.clone(),
                 folder: folder.to_lowercase(),
-                uid: msg.uid.unwrap_or(0),
+                uid,
                 sender: from.clone(),
                 sender_email: from,
                 recipient: to_header,

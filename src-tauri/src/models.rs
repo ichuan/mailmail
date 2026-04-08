@@ -17,7 +17,7 @@ pub struct Account {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Email {
-    pub id: String, // our local UUID or combined account+uid
+    pub id: String, // deterministic: "{account_id}_{folder}_{uid}"
     pub account_id: String,
     pub folder: String,
     pub uid: u32,
