@@ -1,0 +1,12 @@
+{
+  "id": "image-toggle",
+  "name": "Image Toggle",
+  "version": "1.0.0",
+  "description": "Adds a quick image visibility toggle button to the email toolbar",
+  "main": "index.tsx",
+  "permissions": [
+    "settings:read",
+    "settings:write",
+    "ui:slot"
+  ]
+}
