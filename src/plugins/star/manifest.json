@@ -1,0 +1,7 @@
+{
+  "id": "star",
+  "name": "Star Email",
+  "version": "1.0.0",
+  "description": "Star/unstar emails for quick access",
+  "permissions": ["email:read", "email:modify-metadata", "ui:slot"]
+}

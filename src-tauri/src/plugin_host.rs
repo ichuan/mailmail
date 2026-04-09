@@ -178,6 +178,7 @@ mod tests {
             body_text: Some("text".to_string()),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             read: false,
+            starred: false,
         }
     }
 

@@ -58,6 +58,7 @@ impl Db {
                 body_html TEXT,
                 timestamp TEXT NOT NULL,
                 is_read BOOLEAN NOT NULL DEFAULT 0,
+                is_starred BOOLEAN NOT NULL DEFAULT 0,
                 FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
             );
             "#,
@@ -77,9 +78,12 @@ impl Db {
         }
 
         // Migration: add recipient column to existing databases that predate this field.
-        // Ignoring the error is intentional — SQLite returns "duplicate column name" if it
-        // already exists, which is harmless.
         let _ = sqlx::query("ALTER TABLE emails ADD COLUMN recipient TEXT DEFAULT ''")
+            .execute(&self.pool)
+            .await;
+
+        // Migration: add is_starred column for the star feature.
+        let _ = sqlx::query("ALTER TABLE emails ADD COLUMN is_starred BOOLEAN NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
 
@@ -221,7 +225,7 @@ impl Db {
 
     pub async fn get_emails_by_folder(&self, account_id: &str, folder: &str) -> Result<Vec<crate::models::Email>, String> {
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
         )
             .bind(account_id)
             .bind(folder)
@@ -245,6 +249,7 @@ impl Db {
                 body_html: row.try_get("body_html").map_err(|e| e.to_string())?,
                 timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
                 read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
+                starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
             });
         }
         Ok(emails)
@@ -253,6 +258,16 @@ impl Db {
     pub async fn mark_email_read(&self, id: &str, read: bool) -> Result<(), String> {
         sqlx::query("UPDATE emails SET is_read = ? WHERE id = ?")
             .bind(read)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn toggle_star(&self, id: &str, starred: bool) -> Result<(), String> {
+        sqlx::query("UPDATE emails SET is_starred = ? WHERE id = ?")
+            .bind(starred)
             .bind(id)
             .execute(&self.pool)
             .await
@@ -274,7 +289,7 @@ impl Db {
     pub async fn search_emails(&self, account_id: &str, folder: &str, query: &str) -> Result<Vec<crate::models::Email>, String> {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read \
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred \
              FROM emails \
              WHERE account_id = ? AND folder = ? \
                AND (subject LIKE ? OR sender LIKE ? OR body_text LIKE ?) \
@@ -305,6 +320,7 @@ impl Db {
                 body_html: row.try_get("body_html").map_err(|e| e.to_string())?,
                 timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
                 read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
+                starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
             });
         }
         Ok(emails)
@@ -352,6 +368,7 @@ mod tests {
             body_text: Some("Hello".to_string()),
             timestamp: "2026-01-01T00:00:00+00:00".to_string(),
             read: false,
+            starred: false,
         }
     }
 
@@ -521,5 +538,23 @@ mod tests {
         // Search with no match — should return empty
         let results = db.search_emails("acc-1", "inbox", "nonexistent_xyz").await.unwrap();
         assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_toggle_star() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+
+        let email = test_email("acc-1", 1);
+        db.upsert_email(&email).await.unwrap();
+
+        // Star by id as used in upsert
+        db.toggle_star("email-1", true).await.unwrap();
+        let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
+        assert!(emails[0].starred);
+
+        db.toggle_star("email-1", false).await.unwrap();
+        let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
+        assert!(!emails[0].starred);
     }
 }

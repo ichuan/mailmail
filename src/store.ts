@@ -13,6 +13,7 @@ export interface Email {
   bodyText?: string;
   timestamp: string;
   read: boolean;
+  starred: boolean;
   folder: 'inbox' | 'sent' | 'trash';
   accountId: string;
 }
@@ -64,6 +65,7 @@ interface MailStore {
   mergeEmails: (newEmails: Email[]) => void;
   removeEmail: (id: string) => void;
   markEmailRead: (id: string, read: boolean) => void;
+  toggleStar: (id: string, starred: boolean) => void;
   setSearchQuery: (query: string) => void;
 }
 
@@ -136,6 +138,11 @@ export const useMailStore = create<MailStore>((set) => ({
   markEmailRead: (id, read) => {
     set((state) => ({
       emails: state.emails.map(e => e.id === id ? { ...e, read } : e),
+    }));
+  },
+  toggleStar: (id, starred) => {
+    set((state) => ({
+      emails: state.emails.map(e => e.id === id ? { ...e, starred } : e),
     }));
   },
   setSearchQuery: (query) => set({ searchQuery: query }),
