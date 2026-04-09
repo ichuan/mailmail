@@ -29,6 +29,7 @@ import SettingsView from './SettingsView';
 import AddAccountView from './AddAccountView';
 import ComposeView from './ComposeView';
 import { Slot } from './core/slot-registry';
+import { initBuiltinPlugins, destroyPlugins } from './plugin-registry';
 
 function cx(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -102,6 +103,12 @@ export default function App() {
     removeEmail,
     setSearchQuery,
   } = useMailStore();
+
+  // Initialize plugins once on mount
+  useEffect(() => {
+    initBuiltinPlugins();
+    return () => destroyPlugins();
+  }, []);
 
   // Load persisted settings + accounts on startup
   useEffect(() => {
