@@ -70,9 +70,6 @@ html, body, #root {
   background: rgba(0,0,0,0.2);
 }
 
-/* When "Show Images" is disabled, hide all img tags inside email bodies.
-   !important is required because HTML emails often have inline style="display:block"
-   on <img> elements, which would otherwise override a plain display:none rule. */
-.hide-images img {
-  display: none !important;
-}
+/* .hide-images CSS rule removed — image suppression now uses DOM-level
+   <img> tag stripping in sanitizeEmailHtml() to prevent HTTP requests entirely.
+   CSS display:none cannot prevent tracker pixels from firing. */

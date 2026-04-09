@@ -33,16 +33,16 @@ export default function ComposeView() {
         inReplyTo: composeState?.inReplyTo ?? null,
       });
       closeCompose();
-    } catch (err: any) {
-      setErrorMsg(err.toString());
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-white text-[#1a1c1c]">
-      <div className="h-14 border-b border-[#e2e2e2] flex items-center px-6 justify-between flex-shrink-0">
+    <div className="w-full h-full flex flex-col bg-[var(--c-bg)] text-[var(--c-text)]">
+      <div className="h-14 border-b border-[var(--c-border)] flex items-center px-6 justify-between flex-shrink-0">
         <h2 className="text-lg font-semibold">New Message</h2>
         <div className="flex items-center gap-2">
           <button
@@ -53,7 +53,7 @@ export default function ComposeView() {
             <Send size={14} />
             {sending ? 'Sending...' : 'Send'}
           </button>
-          <button onClick={closeCompose} className="p-2 hover:bg-[#f3f3f3] rounded-md text-[#717783] transition-colors">
+          <button onClick={closeCompose} className="p-2 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -65,40 +65,39 @@ export default function ComposeView() {
         )}
 
         <div className="space-y-3 max-w-3xl">
-          {accounts.length > 1 && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-[#717783] w-16 text-right">From</label>
-              <select
-                value={selectedAccountId}
-                onChange={e => setSelectedAccountId(e.target.value)}
-                className="flex-1 p-2 border border-[#e2e2e2] rounded-md text-sm outline-none focus:border-[#004f96] bg-white"
-              >
-                {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>{acc.name} &lt;{acc.email}&gt;</option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* From selector: always shown so user can choose which account to send from */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">From</label>
+            <select
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              className="flex-1 p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
+            >
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>{acc.name} &lt;{acc.email}&gt;</option>
+              ))}
+            </select>
+          </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-sm text-[#717783] w-16 text-right">To</label>
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">To</label>
             <input
               type="email"
               value={to}
               onChange={e => setTo(e.target.value)}
-              className="flex-1 p-2 border border-[#e2e2e2] rounded-md text-sm outline-none focus:border-[#004f96]"
+              className="flex-1 p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
               placeholder="recipient@example.com"
               required
             />
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-sm text-[#717783] w-16 text-right">Subject</label>
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">Subject</label>
             <input
               type="text"
               value={subject}
               onChange={e => setSubject(e.target.value)}
-              className="flex-1 p-2 border border-[#e2e2e2] rounded-md text-sm outline-none focus:border-[#004f96]"
+              className="flex-1 p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
               placeholder="Subject"
             />
           </div>
@@ -107,7 +106,7 @@ export default function ComposeView() {
             <textarea
               value={body}
               onChange={e => setBody(e.target.value)}
-              className="w-full min-h-[400px] p-3 border border-[#e2e2e2] rounded-md text-sm outline-none focus:border-[#004f96] resize-none leading-relaxed"
+              className="w-full min-h-[400px] p-3 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] resize-none leading-relaxed bg-[var(--c-panel)] text-[var(--c-text)]"
               placeholder="Write your message..."
             />
           </div>

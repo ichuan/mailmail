@@ -168,23 +168,35 @@ export default function SettingsView() {
            </div>
         </section>
 
-        {/* Security Section (Placeholder) */}
+        {/* Security & Storage info card */}
         <section>
-           <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase mb-4">Security &amp; Storage</h3>
-           <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl overflow-hidden shadow-sm">
-              <div className="flex items-center justify-between p-4 border-b border-[var(--c-border-subtle)] cursor-pointer hover:bg-[var(--c-hover)] transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-[var(--c-bg)] flex items-center justify-center text-[var(--c-text-mid)]"><Shield size={18} /></div>
-                  <span className="font-medium text-sm">Privacy Options</span>
-                </div>
+          <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase mb-4">Security &amp; Storage</h3>
+          <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl shadow-sm p-5 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0 text-[var(--c-text-mid)]"><Shield size={18} /></div>
+              <div>
+                <p className="text-sm font-medium mb-1">Encrypted in transit</p>
+                <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">
+                  All connections to your mail server use TLS/SSL. Credentials and email data
+                  travel over an encrypted channel directly between this app and your server —
+                  no proxy or intermediary involved.
+                </p>
               </div>
-              <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-[var(--c-hover)] transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-[var(--c-bg)] flex items-center justify-center text-[var(--c-text-mid)]"><KeyRound size={18} /></div>
-                  <span className="font-medium text-sm">Data Encryption</span>
-                </div>
+            </div>
+            <div className="border-t border-[var(--c-border-subtle)]" />
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0 text-[var(--c-text-mid)]"><KeyRound size={18} /></div>
+              <div>
+                <p className="text-sm font-medium mb-1">Stored locally only</p>
+                <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">
+                  All email data is cached in a SQLite database on your device only. This app
+                  has no backend server and sends nothing to third parties. Your account
+                  credentials are stored in your OS keychain or the app data directory and
+                  are never transmitted anywhere except to your own mail server.
+                </p>
               </div>
-           </div>
+            </div>
+          </div>
         </section>
       </div>
     </div>
