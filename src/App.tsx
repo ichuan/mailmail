@@ -28,6 +28,7 @@ import { twMerge } from 'tailwind-merge';
 import SettingsView from './SettingsView';
 import AddAccountView from './AddAccountView';
 import ComposeView from './ComposeView';
+import { Slot } from './core/slot-registry';
 
 function cx(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -378,6 +379,7 @@ export default function App() {
         className="w-60 flex-shrink-0 flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
       >
         <div>
+          <Slot id="sidebar:top" />
           {/* Top action buttons: New Mail + Refresh */}
           <div className="flex items-center gap-2 p-3 pt-6">
             <button
@@ -451,6 +453,7 @@ export default function App() {
                 active={activeView === 'settings'}
                 onClick={() => setView('settings')}
               />
+              <Slot id="sidebar:bottom" />
             </div>
           </div>
         </div>
@@ -564,6 +567,7 @@ export default function App() {
                     >
                       <Trash size={18} />
                     </button>
+                    <Slot id="toolbar:actions" email={selectedEmail} />
                   </div>
                 </div>
 
@@ -578,6 +582,7 @@ export default function App() {
                       <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'} • {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}</div>
                     </div>
                   </div>
+                  <Slot id="email-detail:header" email={selectedEmail} />
                   {/* Body: strip img tags (not CSS) when showImages is off
                       so tracker pixel HTTP requests are never fired. */}
                   <div
@@ -597,6 +602,7 @@ export default function App() {
                       <div className="whitespace-pre-wrap">{selectedEmail.bodyText}</div>
                     )}
                   </div>
+                  <Slot id="email-detail:footer" email={selectedEmail} />
                 </div>
               </>
             ) : (
