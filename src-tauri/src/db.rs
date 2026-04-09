@@ -193,6 +193,18 @@ impl Db {
         Ok(())
     }
 
+    /// Overwrite only the password column for an existing account.
+    /// Used during keychain migration to replace plaintext with the sentinel "KEYCHAIN".
+    pub async fn set_account_password(&self, id: &str, password: &str) -> Result<(), String> {
+        sqlx::query("UPDATE accounts SET password = ? WHERE id = ?")
+            .bind(password)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
         let row = sqlx::query("SELECT value FROM settings WHERE key = ?")
             .bind(key)

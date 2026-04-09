@@ -6,6 +6,7 @@ mod models;
 mod imap;
 mod smtp;
 mod plugin_host;
+mod keychain;
 
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -19,6 +20,18 @@ struct AppState {
     plugin_host: Mutex<PluginHost>,
     /// Per-account IMAP IDLE background tasks. Abort a handle to stop its watcher.
     idle_tasks: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+}
+
+/// Replace the "KEYCHAIN" sentinel in an account's password field with the real
+/// password fetched from the OS keychain. No-op if the password is already plain.
+async fn hydrate_password(account: &mut Account) -> Result<(), String> {
+    if account.password == "KEYCHAIN" {
+        let id = account.id.clone();
+        account.password = tokio::task::spawn_blocking(move || keychain::get_password(&id))
+            .await
+            .map_err(|e| e.to_string())??;
+    }
+    Ok(())
 }
 
 /// Start (or restart) the IMAP IDLE watcher for a single account.
@@ -42,19 +55,44 @@ fn get_db(db_opt: &Option<db::Db>) -> Result<&db::Db, String> {
 #[tauri::command]
 async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, String> {
     let guard = state.db.lock().await;
-    get_db(&guard)?.get_accounts().await
+    let db = get_db(&guard)?;
+    let mut accounts = db.get_accounts().await?;
+    // Migrate plaintext passwords to OS keychain on first run after upgrade.
+    for account in &mut accounts {
+        if account.password != "KEYCHAIN" && !account.password.is_empty() {
+            let id = account.id.clone();
+            let pw = account.password.clone();
+            let stored = tokio::task::spawn_blocking(move || keychain::store_password(&id, &pw))
+                .await
+                .map_err(|e| e.to_string())?;
+            if stored.is_ok() {
+                db.set_account_password(&account.id, "KEYCHAIN").await.ok();
+                account.password = "KEYCHAIN".to_string();
+            }
+        }
+    }
+    Ok(accounts)
 }
 
 #[tauri::command]
 async fn add_account(
     state: State<'_, Arc<AppState>>,
     app_handle: AppHandle,
-    account: Account,
+    mut account: Account,
 ) -> Result<(), String> {
+    // Store real password in OS keychain; persist only the sentinel in SQLite.
+    let id = account.id.clone();
+    let pw = account.password.clone();
+    tokio::task::spawn_blocking(move || keychain::store_password(&id, &pw))
+        .await
+        .map_err(|e| e.to_string())??;
+    account.password = "KEYCHAIN".to_string();
     {
         let guard = state.db.lock().await;
         get_db(&guard)?.insert_account(&account).await?;
     }
+    // Hydrate the real password before starting the IDLE watcher.
+    hydrate_password(&mut account).await?;
     start_idle_for_account((*state).clone(), account, app_handle).await;
     Ok(())
 }
@@ -65,6 +103,9 @@ async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(
         let guard = state.db.lock().await;
         get_db(&guard)?.delete_account(&id).await?;
     }
+    // Remove the password from OS keychain.
+    let id_kc = id.clone();
+    tokio::task::spawn_blocking(move || keychain::delete_password(&id_kc)).await.ok();
     // Abort the IDLE watcher task for this account.
     let mut tasks = state.idle_tasks.lock().await;
     if let Some(handle) = tasks.remove(&id) {
@@ -75,7 +116,8 @@ async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(
 }
 
 #[tauri::command]
-async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_days: i64) -> Result<Vec<Email>, String> {
+async fn sync_inbox(state: State<'_, Arc<AppState>>, mut account: Account, limit_days: i64) -> Result<Vec<Email>, String> {
+    hydrate_password(&mut account).await?;
     log::info!("Starting sync_inbox for account: {}", account.email);
     let (mut emails, raw_attachments) = imap::fetch_inbox(&account, limit_days).await?;
 
@@ -102,7 +144,8 @@ async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_day
 }
 
 #[tauri::command]
-async fn sync_folder(state: State<'_, Arc<AppState>>, account: Account, folder: String, limit_days: i64) -> Result<Vec<Email>, String> {
+async fn sync_folder(state: State<'_, Arc<AppState>>, mut account: Account, folder: String, limit_days: i64) -> Result<Vec<Email>, String> {
+    hydrate_password(&mut account).await?;
     log::info!("Syncing folder '{}' for account: {}", folder, account.email);
     let (mut emails, raw_attachments) = imap::fetch_folder(&account, &folder, limit_days).await?;
 
@@ -137,11 +180,12 @@ async fn get_cached_emails(state: State<'_, Arc<AppState>>, account_id: String, 
 #[tauri::command]
 async fn delete_email(
     state: State<'_, Arc<AppState>>,
-    account: Account,
+    mut account: Account,
     folder: String,
     uid: u32,
     email_id: String,
 ) -> Result<(), String> {
+    hydrate_password(&mut account).await?;
     log::info!("Deleting UID {} from folder '{}' for account: {}", uid, folder, account.email);
     imap::delete_email_on_server(&account, &folder, uid).await?;
     let guard = state.db.lock().await;
@@ -155,19 +199,21 @@ async fn search_emails(state: State<'_, Arc<AppState>>, account_id: String, fold
 }
 
 #[tauri::command]
-async fn list_folders(_state: State<'_, Arc<AppState>>, account: Account) -> Result<Vec<String>, String> {
+async fn list_folders(_state: State<'_, Arc<AppState>>, mut account: Account) -> Result<Vec<String>, String> {
+    hydrate_password(&mut account).await?;
     imap::list_folders(&account).await
 }
 
 #[tauri::command]
 async fn send_email(
     state: State<'_, Arc<AppState>>,
-    account: Account,
+    mut account: Account,
     to: String,
     subject: String,
     body: String,
     in_reply_to: Option<String>,
 ) -> Result<(), String> {
+    hydrate_password(&mut account).await?;
     log::info!("Sending email from {} to {}", account.email, to);
 
     // Run backend plugin pipeline before sending
@@ -301,7 +347,12 @@ fn main() {
                                 None => vec![],
                             }
                         };
-                        for account in accounts {
+                        for mut account in accounts {
+                            // Hydrate password from keychain before starting IDLE connection.
+                            if let Err(e) = hydrate_password(&mut account).await {
+                                log::warn!("Could not hydrate password for {}: {}", account.email, e);
+                                continue;
+                            }
                             start_idle_for_account(
                                 state_setup.clone(),
                                 account,
@@ -313,6 +364,12 @@ fn main() {
                     Err(e) => log::error!("Failed to initialize database: {}", e),
                 }
             });
+            // In debug builds, auto-open DevTools so JS console errors are visible
+            // in the terminal/DevTools window instead of being silently swallowed.
+            #[cfg(debug_assertions)]
+            if let Some(win) = app.get_webview_window("main") {
+                win.open_devtools();
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
