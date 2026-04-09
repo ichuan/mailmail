@@ -79,6 +79,17 @@ impl Db {
                 is_default INTEGER NOT NULL DEFAULT 0
             );
             "#,
+            r#"
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                email_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                data BLOB NOT NULL,
+                FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
+            );
+            "#,
         ];
 
         for q in queries {
@@ -92,6 +103,11 @@ impl Db {
 
         // Migration: add is_starred column for the star feature.
         let _ = sqlx::query("ALTER TABLE emails ADD COLUMN is_starred BOOLEAN NOT NULL DEFAULT 0")
+            .execute(&self.pool)
+            .await;
+
+        // Migration: add has_attachments column for attachment support.
+        let _ = sqlx::query("ALTER TABLE emails ADD COLUMN has_attachments BOOLEAN NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
 
@@ -198,8 +214,8 @@ impl Db {
 
     pub async fn upsert_email(&self, email: &crate::models::Email) -> Result<(), String> {
         let q = r#"
-            INSERT INTO emails (id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO emails (id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, has_attachments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id, folder, uid) DO UPDATE SET
                 id = excluded.id,
                 sender = excluded.sender,
@@ -209,7 +225,8 @@ impl Db {
                 preview = excluded.preview,
                 body_text = excluded.body_text,
                 body_html = excluded.body_html,
-                timestamp = excluded.timestamp
+                timestamp = excluded.timestamp,
+                has_attachments = excluded.has_attachments
         "#;
         sqlx::query(q)
             .bind(&email.id)
@@ -225,6 +242,7 @@ impl Db {
             .bind(&email.body_html)
             .bind(&email.timestamp)
             .bind(email.read)
+            .bind(email.has_attachments)
             .execute(&self.pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -233,7 +251,7 @@ impl Db {
 
     pub async fn get_emails_by_folder(&self, account_id: &str, folder: &str) -> Result<Vec<crate::models::Email>, String> {
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
         )
             .bind(account_id)
             .bind(folder)
@@ -258,6 +276,7 @@ impl Db {
                 timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
                 read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
                 starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
+                has_attachments: row.try_get::<bool, _>("has_attachments").unwrap_or(false),
             });
         }
         Ok(emails)
@@ -297,7 +316,7 @@ impl Db {
     pub async fn search_emails(&self, account_id: &str, folder: &str, query: &str) -> Result<Vec<crate::models::Email>, String> {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred \
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments \
              FROM emails \
              WHERE account_id = ? AND folder = ? \
                AND (subject LIKE ? OR sender LIKE ? OR body_text LIKE ?) \
@@ -329,9 +348,63 @@ impl Db {
                 timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
                 read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
                 starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
+                has_attachments: row.try_get::<bool, _>("has_attachments").unwrap_or(false),
             });
         }
         Ok(emails)
+    }
+
+    /// Store an attachment's binary data in the DB. Replaces any existing attachment with the same id.
+    pub async fn insert_attachment(&self, meta: &crate::models::Attachment, data: &[u8]) -> Result<(), String> {
+        sqlx::query(
+            "INSERT INTO attachments (id, email_id, filename, mime_type, size, data) VALUES (?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET filename=excluded.filename, mime_type=excluded.mime_type, size=excluded.size, data=excluded.data"
+        )
+        .bind(&meta.id)
+        .bind(&meta.email_id)
+        .bind(&meta.filename)
+        .bind(&meta.mime_type)
+        .bind(meta.size)
+        .bind(data)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Returns attachment metadata (no BLOB data) for all attachments of a given email.
+    pub async fn get_attachments_for_email(&self, email_id: &str) -> Result<Vec<crate::models::Attachment>, String> {
+        let rows = sqlx::query(
+            "SELECT id, email_id, filename, mime_type, size FROM attachments WHERE email_id = ? ORDER BY rowid ASC"
+        )
+        .bind(email_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let mut attachments = Vec::new();
+        for row in rows {
+            attachments.push(crate::models::Attachment {
+                id: row.try_get("id").map_err(|e| e.to_string())?,
+                email_id: row.try_get("email_id").map_err(|e| e.to_string())?,
+                filename: row.try_get("filename").map_err(|e| e.to_string())?,
+                mime_type: row.try_get("mime_type").map_err(|e| e.to_string())?,
+                size: row.try_get("size").map_err(|e| e.to_string())?,
+            });
+        }
+        Ok(attachments)
+    }
+
+    /// Returns the raw binary data for a single attachment (for save-to-disk).
+    pub async fn get_attachment_data(&self, id: &str) -> Result<Vec<u8>, String> {
+        let row = sqlx::query("SELECT data FROM attachments WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Attachment '{}' not found", id))?;
+        let data: Vec<u8> = row.try_get("data").map_err(|e| e.to_string())?;
+        Ok(data)
     }
 
     pub async fn get_signatures(&self) -> Result<Vec<crate::models::Signature>, String> {
@@ -426,6 +499,7 @@ mod tests {
             timestamp: "2026-01-01T00:00:00+00:00".to_string(),
             read: false,
             starred: false,
+            has_attachments: false,
         }
     }
 
@@ -613,5 +687,31 @@ mod tests {
         db.toggle_star("email-1", false).await.unwrap();
         let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
         assert!(!emails[0].starred);
+    }
+
+    #[tokio::test]
+    async fn test_attachment_insert_and_retrieve() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+        let mut email = test_email("acc-1", 42);
+        email.has_attachments = true;
+        db.upsert_email(&email).await.unwrap();
+
+        let meta = crate::models::Attachment {
+            id: "email-42_att_0".to_string(),
+            email_id: "email-42".to_string(),
+            filename: "report.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size: 1234,
+        };
+        db.insert_attachment(&meta, b"fake-pdf-bytes").await.unwrap();
+
+        let atts = db.get_attachments_for_email("email-42").await.unwrap();
+        assert_eq!(atts.len(), 1);
+        assert_eq!(atts[0].filename, "report.pdf");
+        assert_eq!(atts[0].size, 1234);
+
+        let data = db.get_attachment_data("email-42_att_0").await.unwrap();
+        assert_eq!(data, b"fake-pdf-bytes");
     }
 }
