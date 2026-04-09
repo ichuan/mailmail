@@ -5,6 +5,8 @@ import starPlugin from './plugins/star/index';
 import starManifest from './plugins/star/manifest.json';
 import signaturePlugin from './plugins/signature/index';
 import signatureManifest from './plugins/signature/manifest.json';
+import notificationPlugin from './plugins/notification/index';
+import notificationManifest from './plugins/notification/manifest.json';
 import type { PluginManifest } from './core/plugin-api';
 
 /**
@@ -16,6 +18,7 @@ export function initBuiltinPlugins(): void {
   pluginManager.register(imageToggleManifest as PluginManifest, imageTogglePlugin);
   pluginManager.register(starManifest as PluginManifest, starPlugin);
   pluginManager.register(signatureManifest as PluginManifest, signaturePlugin);
+  pluginManager.register(notificationManifest as PluginManifest, notificationPlugin);
 
   pluginManager.activateAll();
 }

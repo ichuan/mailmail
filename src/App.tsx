@@ -32,6 +32,7 @@ import ComposeView from './ComposeView';
 import { Slot } from './core/slot-registry';
 import { initBuiltinPlugins, destroyPlugins } from './plugin-registry';
 import { pluginManager } from './core/plugin-manager';
+import { eventBus } from './core/event-bus';
 
 // Special virtual folder key that aggregates all accounts' inboxes.
 export const ALL_INBOXES = '__all__';
@@ -205,8 +206,14 @@ export default function App() {
         if (!cancelled) {
           const { emails: cur } = useMailStore.getState();
           const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
+          const existingIds = new Set(cur.map(e => e.id));
           const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
           setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
+          // Notify plugins about genuinely new emails (not seen in previous cache)
+          const newEmails = merged.filter(e => !existingIds.has(e.id) && !e.read);
+          if (newEmails.length > 0) {
+            eventBus.emit('email:received', { emails: newEmails });
+          }
         }
       } catch (err) {
         console.error("Folder sync error:", err);
