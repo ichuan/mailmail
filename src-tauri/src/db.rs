@@ -89,6 +89,18 @@ impl Db {
             .execute(&self.pool)
             .await;
 
+        // Migration: normalize email IDs to the deterministic format used by imap.rs.
+        // Before commit f35c189, IDs were random UUIDs regenerated on every IMAP fetch.
+        // This caused the selectedEmailId to become orphaned after each background sync.
+        // Updating the DB here means the first cache load already returns stable IDs,
+        // so the user never sees a selected email disappear during the initial sync.
+        let _ = sqlx::query(
+            "UPDATE emails SET id = account_id || '_' || lower(folder) || '_' || CAST(uid AS TEXT) \
+             WHERE id != account_id || '_' || lower(folder) || '_' || CAST(uid AS TEXT)"
+        )
+        .execute(&self.pool)
+        .await;
+
         Ok(())
     }
 
