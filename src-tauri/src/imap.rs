@@ -2,6 +2,9 @@ use crate::models::{Account, Email, AttachmentWithData, Attachment};
 use mailparse::parse_mail;
 use ammonia;
 use futures::StreamExt;
+use std::time::Duration;
+use async_imap::extensions::idle::IdleResponse;
+use tauri::Emitter;
 
 fn extract_body_recursive<'a>(part: &mailparse::ParsedMail<'a>, body_text: &mut String, body_html: &mut String) {
     if part.subparts.is_empty() {
@@ -331,4 +334,81 @@ pub async fn delete_email_on_server(account: &Account, folder: &str, uid: u32) -
 
     let _ = session.logout().await;
     Ok(())
+}
+
+/// Long-running IMAP IDLE watcher for a single account's INBOX.
+///
+/// Opens a dedicated IMAP connection, enters IDLE mode, and emits the Tauri
+/// event `"mail:new"` whenever the server notifies us of new messages.
+/// Re-enters IDLE every 25 minutes to comply with RFC 2177 (< 29-minute limit).
+/// Reconnects automatically on any connection error.
+///
+/// Designed to run inside a `tokio::spawn` task. Call `JoinHandle::abort()`
+/// to stop it when its account is removed.
+pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
+    let email = account.email.clone();
+
+    'reconnect: loop {
+        // Establish a fresh dedicated IDLE connection.
+        let mut session = match connect_imap(&account).await {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("IDLE [{}]: connect failed — {}", email, e);
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue 'reconnect;
+            }
+        };
+
+        if let Err(e) = session.select("INBOX").await {
+            log::warn!("IDLE [{}]: SELECT INBOX failed — {}", email, e);
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            continue 'reconnect;
+        }
+
+        log::info!("IDLE [{}]: watching INBOX", email);
+
+        // Inner loop: IDLE → wait → DONE → repeat.
+        // Each cycle waits up to 25 min before re-issuing IDLE (RFC 2177 recommends < 29 min).
+        'idle_loop: loop {
+            // `session.idle()` moves the session into the Handle.
+            let mut handle = session.idle();
+
+            if let Err(e) = handle.init().await {
+                log::warn!("IDLE [{}]: IDLE init failed — {}", email, e);
+                // Handle (and the session inside it) will be dropped here.
+                break 'idle_loop; // triggers reconnect
+            }
+
+            // wait_with_timeout borrows &mut handle via the '_ lifetime on the returned future.
+            // After the future is awaited (consumed), the borrow ends and handle is accessible again.
+            let (wait_fut, _stop_src) = handle.wait_with_timeout(Duration::from_secs(25 * 60));
+            let response = match wait_fut.await {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("IDLE [{}]: wait error — {}", email, e);
+                    break 'idle_loop; // handle dropped here, triggers reconnect
+                }
+            };
+
+            // Send DONE and recover the session for the next IDLE cycle.
+            session = match handle.done().await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("IDLE [{}]: DONE error — {}", email, e);
+                    break 'idle_loop; // triggers reconnect
+                }
+            };
+
+            if matches!(response, IdleResponse::NewData(_)) {
+                log::info!("IDLE [{}]: new mail detected", email);
+                if let Err(e) = app_handle.emit("mail:new", ()) {
+                    log::warn!("IDLE [{}]: failed to emit mail:new — {}", email, e);
+                }
+            }
+            // On Timeout or ManualInterrupt: just loop and re-enter IDLE.
+        }
+
+        // Brief back-off before reconnecting after a connection/protocol error.
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
 }
