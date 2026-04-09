@@ -10,7 +10,7 @@ mod plugin_host;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Manager, State};
-use crate::models::{Account, Email, Signature};
+use crate::models::{Account, Email, Signature, Attachment};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 
 struct AppState {
@@ -43,7 +43,7 @@ async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(
 #[tauri::command]
 async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_days: i64) -> Result<Vec<Email>, String> {
     log::info!("Starting sync_inbox for account: {}", account.email);
-    let mut emails = imap::fetch_inbox(&account, limit_days).await?;
+    let (mut emails, raw_attachments) = imap::fetch_inbox(&account, limit_days).await?;
 
     // Run backend plugin pipeline on fetched emails
     {
@@ -58,6 +58,11 @@ async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_day
                 log::warn!("Cache write failed for email {}: {}", email.id, e);
             }
         }
+        for att in &raw_attachments {
+            if let Err(e) = db.insert_attachment(&att.meta, &att.data).await {
+                log::warn!("Attachment cache write failed for {}: {}", att.meta.id, e);
+            }
+        }
     }
     Ok(emails)
 }
@@ -65,7 +70,7 @@ async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_day
 #[tauri::command]
 async fn sync_folder(state: State<'_, Arc<AppState>>, account: Account, folder: String, limit_days: i64) -> Result<Vec<Email>, String> {
     log::info!("Syncing folder '{}' for account: {}", folder, account.email);
-    let mut emails = imap::fetch_folder(&account, &folder, limit_days).await?;
+    let (mut emails, raw_attachments) = imap::fetch_folder(&account, &folder, limit_days).await?;
 
     // Run backend plugin pipeline on fetched emails
     {
@@ -78,6 +83,11 @@ async fn sync_folder(state: State<'_, Arc<AppState>>, account: Account, folder: 
         for email in &emails {
             if let Err(e) = db.upsert_email(email).await {
                 log::warn!("Cache write failed for email {}: {}", email.id, e);
+            }
+        }
+        for att in &raw_attachments {
+            if let Err(e) = db.insert_attachment(&att.meta, &att.data).await {
+                log::warn!("Attachment cache write failed for {}: {}", att.meta.id, e);
             }
         }
     }
@@ -155,6 +165,32 @@ async fn mark_email_read(state: State<'_, Arc<AppState>>, id: String, read: bool
 }
 
 #[tauri::command]
+async fn get_attachments(state: State<'_, Arc<AppState>>, email_id: String) -> Result<Vec<Attachment>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.get_attachments_for_email(&email_id).await
+}
+
+/// Write attachment data from the DB cache to a file on disk.
+/// `dest_path` is the full absolute path provided by the frontend (e.g. Downloads/report.pdf).
+#[tauri::command]
+async fn save_attachment(state: State<'_, Arc<AppState>>, id: String, dest_path: String) -> Result<(), String> {
+    let guard = state.db.lock().await;
+    let data = get_db(&guard)?.get_attachment_data(&id).await?;
+    drop(guard);
+
+    // Validate dest_path is not empty to avoid accidental root writes.
+    if dest_path.is_empty() {
+        return Err("dest_path must not be empty".to_string());
+    }
+    // Create parent directory if it doesn't exist.
+    if let Some(parent) = std::path::Path::new(&dest_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&dest_path, &data).map_err(|e| format!("Failed to write attachment: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn toggle_star(state: State<'_, Arc<AppState>>, id: String, starred: bool) -> Result<(), String> {
     let guard = state.db.lock().await;
     get_db(&guard)?.toggle_star(&id, starred).await
@@ -206,6 +242,8 @@ fn main() {
             get_signatures,
             save_signature,
             delete_signature,
+            get_attachments,
+            save_attachment,
             get_cached_emails,
             delete_email,
             search_emails,

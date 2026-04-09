@@ -14,8 +14,17 @@ export interface Email {
   timestamp: string;
   read: boolean;
   starred: boolean;
+  hasAttachments: boolean;
   folder: 'inbox' | 'sent' | 'trash';
   accountId: string;
+}
+
+export interface Attachment {
+  id: string;
+  emailId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
 }
 
 export interface Account {

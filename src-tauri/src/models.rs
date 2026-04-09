@@ -33,6 +33,25 @@ pub struct Email {
     pub read: bool,
     #[serde(default)]
     pub starred: bool,
+    #[serde(default)]
+    pub has_attachments: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    pub email_id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size: i64,
+}
+
+/// Internal transfer type for carrying raw attachment bytes from imap.rs to main.rs.
+/// Not serialized — the data is stored in the DB, then fetched on demand.
+pub struct AttachmentWithData {
+    pub meta: Attachment,
+    pub data: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -104,6 +123,7 @@ mod tests {
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             read: false,
             starred: false,
+            has_attachments: false,
         };
         let json = serde_json::to_string(&email).unwrap();
         assert!(json.contains("accountId"));

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
+import { downloadDir } from '@tauri-apps/api/path';
 import { useMailStore } from './store';
-import type { Account, Email } from './store';
+import type { Account, Email, Attachment } from './store';
 import { format, isToday, isThisYear } from 'date-fns';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LogicalSize } from '@tauri-apps/api/dpi';
@@ -22,6 +23,8 @@ import {
   Search,
   X,
   Star,
+  Paperclip,
+  Download,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -314,6 +317,37 @@ export default function App() {
     searchDebounceRef.current = setTimeout(() => setSearchQuery(value), 300);
   }, [setSearchQuery]);
 
+  // Attachments for the currently selected email
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [savingAttId, setSavingAttId] = useState<string | null>(null);
+
+  // Load attachments when a the selected email changes
+  useEffect(() => {
+    if (!selectedEmail?.hasAttachments) {
+      setAttachments([]);
+      return;
+    }
+    invoke<Attachment[]>('get_attachments', { emailId: selectedEmail.id })
+      .then(setAttachments)
+      .catch(err => console.warn('Failed to load attachments:', err));
+  }, [selectedEmailId, selectedEmail?.hasAttachments]);
+
+  const handleSaveAttachment = useCallback(async (att: Attachment) => {
+    setSavingAttId(att.id);
+    try {
+      const dir = await downloadDir();
+      // Join with forward-slash; Rust will handle platform path normalization.
+      const destPath = `${dir}/${att.filename}`;
+      await invoke('save_attachment', { id: att.id, destPath });
+      // Open the saved file using the shell plugin.
+      openExternal(destPath).catch(console.error);
+    } catch (err) {
+      console.error('Failed to save attachment:', err);
+    } finally {
+      setSavingAttId(null);
+    }
+  }, []);
+
   // Right-click context menu state
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
@@ -592,6 +626,9 @@ export default function App() {
                     {email.starred && (
                       <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
                     )}
+                    {email.hasAttachments && (
+                      <Paperclip size={11} className="flex-shrink-0 text-[var(--c-text-muted)] mt-0.5" />
+                    )}
                     <div className={cx("text-sm mb-1 truncate", !email.read ? "font-medium" : "font-normal")}>{email.subject}</div>
                   </div>
                   <div className="text-sm text-[var(--c-text-mid)] truncate opacity-90">{email.preview}</div>
@@ -676,6 +713,39 @@ export default function App() {
                     )}
                   </div>
                   <Slot id="email-detail:footer" email={selectedEmail} />
+                  {/* Attachment panel — shown only when this email has attachments */}
+                  {attachments.length > 0 && (
+                    <div className="mt-8 pt-6 border-t border-[var(--c-border)]">
+                      <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-[var(--c-text-mid)]">
+                        <Paperclip size={14} />
+                        <span>{attachments.length} Attachment{attachments.length > 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        {attachments.map(att => (
+                          <div
+                            key={att.id}
+                            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--c-bg)] border border-[var(--c-border)] max-w-xs"
+                          >
+                            <Paperclip size={16} className="flex-shrink-0 text-[var(--c-text-muted)]" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium truncate" title={att.filename}>{att.filename}</div>
+                              <div className="text-xs text-[var(--c-text-muted)]">{formatFileSize(att.size)}</div>
+                            </div>
+                            <button
+                              onClick={() => handleSaveAttachment(att)}
+                              disabled={savingAttId === att.id}
+                              title="Save attachment"
+                              className="p-1.5 rounded-md hover:bg-[var(--c-hover)] text-[var(--c-text-mid)] hover:text-[var(--c-text)] transition-colors disabled:opacity-40"
+                            >
+                              {savingAttId === att.id
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <Download size={14} />}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -706,6 +776,12 @@ function CtxItem({ label, onClick, danger }: { label: string; onClick: () => voi
       {label}
     </button>
   );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function SidebarItem({ icon, label, active, onClick, count }: { icon: React.ReactNode; label: string; active: boolean; onClick?: () => void; count?: number }) {

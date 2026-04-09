@@ -179,6 +179,7 @@ mod tests {
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             read: false,
             starred: false,
+            has_attachments: false,
         }
     }
 

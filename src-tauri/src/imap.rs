@@ -1,4 +1,4 @@
-use crate::models::{Account, Email};
+use crate::models::{Account, Email, AttachmentWithData, Attachment};
 use mailparse::parse_mail;
 use ammonia;
 use futures::StreamExt;
@@ -18,6 +18,58 @@ fn extract_body_recursive<'a>(part: &mailparse::ParsedMail<'a>, body_text: &mut 
     } else {
         for subpart in &part.subparts {
             extract_body_recursive(subpart, body_text, body_html);
+        }
+    }
+}
+
+/// Walk MIME tree and collect non-text, non-multipart parts as attachments.
+fn extract_attachments_recursive<'a>(
+    email_id: &str,
+    part: &mailparse::ParsedMail<'a>,
+    result: &mut Vec<AttachmentWithData>,
+    index: &mut usize,
+) {
+    if part.subparts.is_empty() {
+        let mimetype = part.ctype.mimetype.to_lowercase();
+        // Skip body text parts — only collect genuine attachment parts.
+        if mimetype.starts_with("text/plain") || mimetype.starts_with("text/html") {
+            return;
+        }
+        // Treat as attachment if Content-Disposition is Attachment or if it's not text/* or multipart/*.
+        let disp = part.get_content_disposition();
+        let is_inline_without_cid = matches!(disp.disposition, mailparse::DispositionType::Inline)
+            && disp.params.get("filename").is_none()
+            && part.ctype.params.get("name").is_none();
+        if is_inline_without_cid {
+            return; // skip embedded content with no filename
+        }
+
+        if let Ok(data) = part.get_body_raw() {
+            if data.is_empty() { return; }
+            let filename = disp.params.get("filename")
+                .or_else(|| part.ctype.params.get("name"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    let ext = mimetype.split('/').nth(1).unwrap_or("bin");
+                    format!("attachment_{}.{}", *index, ext)
+                });
+            let size = data.len() as i64;
+            let id = format!("{}_att_{}", email_id, *index);
+            *index += 1;
+            result.push(AttachmentWithData {
+                meta: Attachment {
+                    id,
+                    email_id: email_id.to_string(),
+                    filename,
+                    mime_type: mimetype,
+                    size,
+                },
+                data,
+            });
+        }
+    } else {
+        for subpart in &part.subparts {
+            extract_attachments_recursive(email_id, subpart, result, index);
         }
     }
 }
@@ -83,8 +135,9 @@ async fn connect_imap(account: &Account) -> Result<async_imap::Session<tokio_nat
     Ok(session)
 }
 
-/// Fetch emails from a specific IMAP folder
-pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> Result<Vec<Email>, String> {
+/// Fetch emails from a specific IMAP folder.
+/// Returns `(emails, raw_attachments)` so the caller can persist both.
+pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> Result<(Vec<Email>, Vec<AttachmentWithData>), String> {
     let mut session = connect_imap(account).await?;
 
     let mailbox = match select_folder(&mut session, folder).await {
@@ -107,7 +160,7 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
     if uid_vec.is_empty() {
         log::info!("No emails found in {} matching criteria.", mailbox);
         let _ = session.logout().await;
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
 
     let uid_set = uid_vec.into_iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
@@ -116,6 +169,7 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
     let mut messages = session.uid_fetch(&uid_set, "RFC822").await.map_err(|e| e.to_string())?;
 
     let mut emails = Vec::new();
+    let mut all_attachments: Vec<AttachmentWithData> = Vec::new();
 
     while let Some(msg_result) = messages.next().await {
         let msg = match msg_result {
@@ -202,18 +256,28 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
                 timestamp,
                 read: false,
                 starred: false,
+                has_attachments: false, // updated below after extracting MIME attachments
             });
+            // Extract attachment parts from the MIME tree for this email.
+            let email_id = format!("{}_{}_{}", account.id, folder.to_lowercase(), msg.uid.unwrap_or(0));
+            let mut att_index = 0usize;
+            extract_attachments_recursive(&email_id, &parsed, &mut all_attachments, &mut att_index);
+            if att_index > 0 {
+                if let Some(last) = emails.last_mut() {
+                    last.has_attachments = true;
+                }
+            }
         }
     }
 
     drop(messages);
     let _ = session.logout().await;
 
-    Ok(emails)
+    Ok((emails, all_attachments))
 }
 
 /// Backward-compatible wrapper
-pub async fn fetch_inbox(account: &Account, days_limit: i64) -> Result<Vec<Email>, String> {
+pub async fn fetch_inbox(account: &Account, days_limit: i64) -> Result<(Vec<Email>, Vec<AttachmentWithData>), String> {
     fetch_folder(account, "inbox", days_limit).await
 }
 
