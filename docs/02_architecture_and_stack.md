@@ -1,10 +1,15 @@
-# Architecture & Tech Stack (Windows Native Native Version)
+# Architecture & Tech Stack (Windows Native Version)
 
 ## Frontend (Presentation Layer)
 - **Framework:** React 19 + TypeScript + Vite.
 - **State Management:** `zustand` (`src/store.ts`).
     - Standardizes data structures across different IMAP servers.
     - Manages global preferences like `syncLimitDays`.
+- **Plugin System:** TypeScript/React 插件架构（详见 `docs/06_plugin_architecture.md`）。
+    - `src/core/event-bus.ts` — 类型安全的事件总线
+    - `src/core/slot-registry.ts` — UI 槽位注册 + `<Slot>` 组件
+    - `src/core/plugin-manager.ts` — 插件加载/卸载/生命周期管理
+    - `src/core/permissions.ts` — 权限声明 + 运行时检查
 - **UI & Icons:** Lucide-React for icons (ensures offline reliability).
 - **Native Context:** Interacts with the native OS via `@tauri-apps/api`. Includes dynamic window resizing for a "native card" feel for Settings vs. Inbox.
 
