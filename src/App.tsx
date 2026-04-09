@@ -21,6 +21,7 @@ import {
   Loader2,
   Search,
   X,
+  Star,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -364,6 +365,12 @@ export default function App() {
                   useMailStore.getState().markEmailRead(e.id, nextRead);
                   closeCtxMenu();
                 }} />
+                <CtxItem label={e.starred ? 'Unstar' : 'Star'} onClick={() => {
+                  const nextStarred = !e.starred;
+                  invoke('toggle_star', { id: e.id, starred: nextStarred }).catch(console.error);
+                  useMailStore.getState().toggleStar(e.id, nextStarred);
+                  closeCtxMenu();
+                }} />
                 <CtxItem label="Reply" onClick={() => { handleReply(e); closeCtxMenu(); }} />
                 <CtxItem label="Forward" onClick={() => { handleForward(e); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
@@ -574,7 +581,12 @@ export default function App() {
                       {smartFormatTime(email.timestamp)}
                     </span>
                   </div>
-                  <div className={cx("text-sm mb-1 truncate", !email.read ? "font-medium" : "font-normal")}>{email.subject}</div>
+                  <div className="flex items-baseline gap-1">
+                    {email.starred && (
+                      <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
+                    )}
+                    <div className={cx("text-sm mb-1 truncate", !email.read ? "font-medium" : "font-normal")}>{email.subject}</div>
+                  </div>
                   <div className="text-sm text-[var(--c-text-mid)] truncate opacity-90">{email.preview}</div>
                 </div>
               ))}

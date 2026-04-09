@@ -201,6 +201,7 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
                 body_text: Some(body_text),
                 timestamp,
                 read: false,
+                starred: false,
             });
         }
     }

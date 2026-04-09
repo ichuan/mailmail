@@ -154,6 +154,12 @@ async fn mark_email_read(state: State<'_, Arc<AppState>>, id: String, read: bool
     get_db(&guard)?.mark_email_read(&id, read).await
 }
 
+#[tauri::command]
+async fn toggle_star(state: State<'_, Arc<AppState>>, id: String, starred: bool) -> Result<(), String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.toggle_star(&id, starred).await
+}
+
 fn main() {
     let mut host = PluginHost::new();
     host.register(Box::new(TrackingPixelStripper));
@@ -178,6 +184,7 @@ fn main() {
             get_setting,
             save_setting,
             mark_email_read,
+            toggle_star,
             get_cached_emails,
             delete_email,
             search_emails,

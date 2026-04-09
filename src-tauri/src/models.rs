@@ -31,6 +31,8 @@ pub struct Email {
     pub body_text: Option<String>,
     pub timestamp: String,
     pub read: bool,
+    #[serde(default)]
+    pub starred: bool,
 }
 
 #[cfg(test)]
@@ -92,6 +94,7 @@ mod tests {
             body_text: Some("text".to_string()),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             read: false,
+            starred: false,
         };
         let json = serde_json::to_string(&email).unwrap();
         assert!(json.contains("accountId"));
