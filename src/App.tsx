@@ -32,6 +32,9 @@ import { Slot } from './core/slot-registry';
 import { initBuiltinPlugins, destroyPlugins } from './plugin-registry';
 import { pluginManager } from './core/plugin-manager';
 
+// Special virtual folder key that aggregates all accounts' inboxes.
+export const ALL_INBOXES = '__all__';
+
 function cx(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
@@ -171,6 +174,9 @@ export default function App() {
   useEffect(() => {
     if (activeView !== 'mail' || accounts.length === 0) return;
 
+    // For the unified inbox, the effective IMAP folder is always 'inbox'.
+    const effectiveFolder = selectedFolder === ALL_INBOXES ? 'inbox' : selectedFolder;
+
     let cancelled = false;
     async function syncFolder() {
       // Show cached emails for this folder immediately
@@ -179,29 +185,27 @@ export default function App() {
         try {
           const cached = await invoke<Email[]>('get_cached_emails', {
             accountId: acc.id,
-            folder: selectedFolder,
+            folder: effectiveFolder,
           });
           cachedAll.push(...cached);
         } catch (_) { /* skip */ }
       }
       if (!cancelled && cachedAll.length > 0) {
-        // Use fresh store state to avoid stale-closure bugs and preserve read flags
-        // (cache rows always reflect DB is_read, which is correct after the mark_email_read fix)
         const { emails: cur } = useMailStore.getState();
-        const otherEmails = cur.filter(e => e.folder !== selectedFolder);
+        // For unified inbox, keep emails from all folders except the inbox ones being replaced.
+        const otherEmails = cur.filter(e => e.folder !== effectiveFolder);
         setEmails([...otherEmails, ...cachedAll]);
       }
 
       // Then refresh from IMAP
       setSyncing(true);
       try {
-        const folderEmails = await syncAllAccounts(accounts, syncLimitDays, selectedFolder);
+        const folderEmails = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
         if (!cancelled) {
-          // IMAP results have read=false; preserve in-memory read state
           const { emails: cur } = useMailStore.getState();
           const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
           const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
-          setEmails([...cur.filter(e => e.folder !== selectedFolder), ...merged]);
+          setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
         }
       } catch (err) {
         console.error("Folder sync error:", err);
@@ -232,14 +236,14 @@ export default function App() {
 
   const handleManualSync = async () => {
     if (syncing || accounts.length === 0) return;
+    const effectiveFolder = selectedFolder === ALL_INBOXES ? 'inbox' : selectedFolder;
     setSyncing(true);
     try {
-      const folderEmails = await syncAllAccounts(accounts, syncLimitDays, selectedFolder);
-      // Preserve in-memory read state: IMAP always returns read=false
+      const folderEmails = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
       const { emails: cur } = useMailStore.getState();
       const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
       const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
-      setEmails([...cur.filter(e => e.folder !== selectedFolder), ...merged]);
+      setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
     } catch (err) {
       console.error("Manual sync error:", err);
     } finally {
@@ -317,7 +321,13 @@ export default function App() {
   const [displayLimit, setDisplayLimit] = useState(50);
 
   const displayEmails = emails.filter(e => {
-    if (e.folder !== selectedFolder) return false;
+    // For the unified inbox, show all inbox-folder emails regardless of account.
+    // For a normal folder, restrict to the exact selectedFolder value.
+    if (selectedFolder === ALL_INBOXES) {
+      if (e.folder !== 'inbox') return false;
+    } else {
+      if (e.folder !== selectedFolder) return false;
+    }
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -436,6 +446,15 @@ export default function App() {
           <div className="px-4 mt-2">
             <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Favorites</h2>
             <nav className="space-y-0.5">
+              {accounts.length > 1 && (
+                <SidebarItem
+                  icon={<Inbox size={16} />}
+                  label="All Inboxes"
+                  active={selectedFolder === ALL_INBOXES && activeView === 'mail'}
+                  onClick={() => setFolder(ALL_INBOXES)}
+                  count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
+                />
+              )}
               <SidebarItem
                 icon={<Inbox size={16} />}
                 label="Inbox"
@@ -569,7 +588,7 @@ export default function App() {
               )}
               {displayEmails.length === 0 && (
                 <div className="p-8 text-center text-[var(--c-text-muted)] text-sm mt-10">
-                  {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder}`}
+                  {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder === ALL_INBOXES ? 'All Inboxes' : selectedFolder}`}
                 </div>
               )}
             </div>
