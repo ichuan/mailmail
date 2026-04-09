@@ -349,8 +349,9 @@ export default function App() {
             return (
               <>
                 <CtxItem label={e.read ? 'Mark as Unread' : 'Mark as Read'} onClick={() => {
-                  invoke('mark_email_read', { id: e.id, read: !e.read }).catch(console.error);
-                  useMailStore.getState().selectEmail(e.read ? null : e.id);
+                  const nextRead = !e.read;
+                  invoke('mark_email_read', { id: e.id, read: nextRead }).catch(console.error);
+                  useMailStore.getState().markEmailRead(e.id, nextRead);
                   closeCtxMenu();
                 }} />
                 <CtxItem label="Reply" onClick={() => { handleReply(e); closeCtxMenu(); }} />

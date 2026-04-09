@@ -63,6 +63,7 @@ interface MailStore {
   closeCompose: () => void;
   mergeEmails: (newEmails: Email[]) => void;
   removeEmail: (id: string) => void;
+  markEmailRead: (id: string, read: boolean) => void;
   setSearchQuery: (query: string) => void;
 }
 
@@ -131,6 +132,11 @@ export const useMailStore = create<MailStore>((set) => ({
       selectedEmailId: state.selectedEmailId === id ? null : state.selectedEmailId,
     }));
     eventBus.emit('email:deleted', { emailId: id });
+  },
+  markEmailRead: (id, read) => {
+    set((state) => ({
+      emails: state.emails.map(e => e.id === id ? { ...e, read } : e),
+    }));
   },
   setSearchQuery: (query) => set({ searchQuery: query }),
 }));
