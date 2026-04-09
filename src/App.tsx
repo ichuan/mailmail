@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { downloadDir } from '@tauri-apps/api/path';
+import { listen } from '@tauri-apps/api/event';
 import { useMailStore } from './store';
 import type { Account, Email, Attachment } from './store';
 import { format, isToday, isThisYear } from 'date-fns';
@@ -173,6 +174,29 @@ export default function App() {
       }
     }
     loadData();
+
+    // Listen for IMAP IDLE push notifications from the Rust backend.
+    // When new mail is detected server-side, trigger an inbox re-sync so the
+    // user sees fresh messages without manually pressing Refresh.
+    // Read store state directly inside the callback to avoid stale closure capture.
+    let unlistenMailNew: (() => void) | undefined;
+    listen<void>('mail:new', () => {
+      const store = useMailStore.getState();
+      if (store.syncing || store.accounts.length === 0) return;
+      const effectiveFolder = store.selectedFolder === ALL_INBOXES ? 'inbox' : store.selectedFolder;
+      store.setSyncing(true);
+      syncAllAccounts(store.accounts, store.syncLimitDays, effectiveFolder)
+        .then(newEmails => {
+          const { emails: cur } = useMailStore.getState();
+          const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
+          const merged = newEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
+          useMailStore.getState().setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
+        })
+        .catch(err => console.error('IDLE-triggered sync failed:', err))
+        .finally(() => useMailStore.getState().setSyncing(false));
+    }).then(fn => { unlistenMailNew = fn; }).catch(console.warn);
+
+    return () => { unlistenMailNew?.(); };
   }, []);
 
   // Sync when folder changes

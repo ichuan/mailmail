@@ -8,14 +8,31 @@ mod smtp;
 mod plugin_host;
 
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use crate::models::{Account, Email, Signature, Attachment};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 
 struct AppState {
     db: Mutex<Option<db::Db>>,
     plugin_host: Mutex<PluginHost>,
+    /// Per-account IMAP IDLE background tasks. Abort a handle to stop its watcher.
+    idle_tasks: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+}
+
+/// Start (or restart) the IMAP IDLE watcher for a single account.
+/// Aborts any pre-existing task for the same account ID.
+async fn start_idle_for_account(state: Arc<AppState>, account: Account, app_handle: AppHandle) {
+    let mut tasks = state.idle_tasks.lock().await;
+    if let Some(old) = tasks.remove(&account.id) {
+        old.abort();
+    }
+    let id = account.id.clone();
+    let handle = tokio::spawn(async move {
+        imap::idle_watcher(account, app_handle).await;
+    });
+    tasks.insert(id, handle);
 }
 
 fn get_db(db_opt: &Option<db::Db>) -> Result<&db::Db, String> {
@@ -29,15 +46,32 @@ async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, S
 }
 
 #[tauri::command]
-async fn add_account(state: State<'_, Arc<AppState>>, account: Account) -> Result<(), String> {
-    let guard = state.db.lock().await;
-    get_db(&guard)?.insert_account(&account).await
+async fn add_account(
+    state: State<'_, Arc<AppState>>,
+    app_handle: AppHandle,
+    account: Account,
+) -> Result<(), String> {
+    {
+        let guard = state.db.lock().await;
+        get_db(&guard)?.insert_account(&account).await?;
+    }
+    start_idle_for_account((*state).clone(), account, app_handle).await;
+    Ok(())
 }
 
 #[tauri::command]
 async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    let guard = state.db.lock().await;
-    get_db(&guard)?.delete_account(&id).await
+    {
+        let guard = state.db.lock().await;
+        get_db(&guard)?.delete_account(&id).await?;
+    }
+    // Abort the IDLE watcher task for this account.
+    let mut tasks = state.idle_tasks.lock().await;
+    if let Some(handle) = tasks.remove(&id) {
+        handle.abort();
+        log::info!("IDLE: watcher aborted for account {}", id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -221,6 +255,7 @@ fn main() {
     let state = Arc::new(AppState {
         db: Mutex::new(None),
         plugin_host: Mutex::new(host),
+        idle_tasks: Mutex::new(HashMap::new()),
     });
 
     tauri::Builder::default()
@@ -248,14 +283,32 @@ fn main() {
             delete_email,
             search_emails,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             let app_dir = handle.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let state_setup = state.clone();
+            let handle_idle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 match db::Db::init(app_dir).await {
                     Ok(db_pool) => {
-                        *state.db.lock().await = Some(db_pool);
+                        *state_setup.db.lock().await = Some(db_pool);
                         log::info!("Database initialized successfully");
+                        // Start IDLE watchers for all already-configured accounts.
+                        let accounts = {
+                            let guard = state_setup.db.lock().await;
+                            match guard.as_ref() {
+                                Some(db) => db.get_accounts().await.unwrap_or_default(),
+                                None => vec![],
+                            }
+                        };
+                        for account in accounts {
+                            start_idle_for_account(
+                                state_setup.clone(),
+                                account,
+                                handle_idle.clone(),
+                            )
+                            .await;
+                        }
                     }
                     Err(e) => log::error!("Failed to initialize database: {}", e),
                 }
