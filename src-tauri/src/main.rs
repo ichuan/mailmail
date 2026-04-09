@@ -5,14 +5,17 @@ mod db;
 mod models;
 mod imap;
 mod smtp;
+mod plugin_host;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Manager, State};
 use crate::models::{Account, Email};
+use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 
 struct AppState {
     db: Mutex<Option<db::Db>>,
+    plugin_host: Mutex<PluginHost>,
 }
 
 fn get_db(db_opt: &Option<db::Db>) -> Result<&db::Db, String> {
@@ -40,7 +43,14 @@ async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(
 #[tauri::command]
 async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_days: i64) -> Result<Vec<Email>, String> {
     log::info!("Starting sync_inbox for account: {}", account.email);
-    let emails = imap::fetch_inbox(&account, limit_days).await?;
+    let mut emails = imap::fetch_inbox(&account, limit_days).await?;
+
+    // Run backend plugin pipeline on fetched emails
+    {
+        let host = state.plugin_host.lock().await;
+        host.run_on_emails_fetched(&mut emails);
+    }
+
     let guard = state.db.lock().await;
     if let Ok(db) = get_db(&guard) {
         for email in &emails {
@@ -55,7 +65,14 @@ async fn sync_inbox(state: State<'_, Arc<AppState>>, account: Account, limit_day
 #[tauri::command]
 async fn sync_folder(state: State<'_, Arc<AppState>>, account: Account, folder: String, limit_days: i64) -> Result<Vec<Email>, String> {
     log::info!("Syncing folder '{}' for account: {}", folder, account.email);
-    let emails = imap::fetch_folder(&account, &folder, limit_days).await?;
+    let mut emails = imap::fetch_folder(&account, &folder, limit_days).await?;
+
+    // Run backend plugin pipeline on fetched emails
+    {
+        let host = state.plugin_host.lock().await;
+        host.run_on_emails_fetched(&mut emails);
+    }
+
     let guard = state.db.lock().await;
     if let Ok(db) = get_db(&guard) {
         for email in &emails {
@@ -100,7 +117,7 @@ async fn list_folders(_state: State<'_, Arc<AppState>>, account: Account) -> Res
 
 #[tauri::command]
 async fn send_email(
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
     account: Account,
     to: String,
     subject: String,
@@ -108,7 +125,15 @@ async fn send_email(
     in_reply_to: Option<String>,
 ) -> Result<(), String> {
     log::info!("Sending email from {} to {}", account.email, to);
-    smtp::send_email(&account, &to, &subject, &body, in_reply_to.as_deref()).await
+
+    // Run backend plugin pipeline before sending
+    let mut processed_body = body;
+    {
+        let host = state.plugin_host.lock().await;
+        host.run_on_email_before_send(&to, &subject, &mut processed_body)?;
+    }
+
+    smtp::send_email(&account, &to, &subject, &processed_body, in_reply_to.as_deref()).await
 }
 
 #[tauri::command]
@@ -130,8 +155,12 @@ async fn mark_email_read(state: State<'_, Arc<AppState>>, id: String, read: bool
 }
 
 fn main() {
+    let mut host = PluginHost::new();
+    host.register(Box::new(TrackingPixelStripper));
+
     let state = Arc::new(AppState {
         db: Mutex::new(None),
+        plugin_host: Mutex::new(host),
     });
 
     tauri::Builder::default()
