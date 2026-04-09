@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useMailStore } from './store';
@@ -31,6 +31,16 @@ import ComposeView from './ComposeView';
 
 function cx(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
+}
+
+/**
+ * Strip <img> tags from HTML so remote images are never loaded.
+ * display:none via CSS still fires HTTP requests; DOM removal does not.
+ * This is the correct approach for preventing email tracker pixels.
+ */
+function sanitizeEmailHtml(html: string, allowImages: boolean): string {
+  if (allowImages) return html;
+  return html.replace(/<img[^>]*\/?>/gi, '');
 }
 
 /**
@@ -230,10 +240,14 @@ export default function App() {
 
   const handleReply = (email: Email) => {
     const replyTo = email.senderEmail || email.sender;
+    const dateStr = format(new Date(email.timestamp), 'EEE, MMM d, yyyy \u2019at\u2019 h:mm a');
+    const originalLines = (email.bodyText || '').split('\n');
+    // RFC-style quoting: prefix each line with '>'
+    const quoted = originalLines.map(l => `> ${l}`).join('\n');
     openCompose({
       to: replyTo,
       subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
-      body: `\n\n--- Original Message ---\nFrom: ${email.sender}\nDate: ${email.timestamp}\n\n${email.bodyText || ''}`,
+      body: `\n\nOn ${dateStr}, ${email.sender} <${email.senderEmail}> wrote:\n${quoted}`,
       fromAccountId: accounts.find(a => a.id === email.accountId)?.id,
     });
   };
@@ -279,6 +293,20 @@ export default function App() {
     searchDebounceRef.current = setTimeout(() => setSearchQuery(value), 300);
   }, [setSearchQuery]);
 
+  // Right-click context menu state
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'email' | 'account';
+    emailTarget?: Email;
+    accountTarget?: Account;
+  } | null>(null);
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  // Load more pagination
+  const [displayLimit, setDisplayLimit] = useState(50);
+
   const displayEmails = emails.filter(e => {
     if (e.folder !== selectedFolder) return false;
     if (!searchQuery.trim()) return true;
@@ -289,26 +317,86 @@ export default function App() {
       (e.bodyText ?? '').toLowerCase().includes(q)
     );
   });
+  // Reset pagination when folder or search changes
+  useEffect(() => { setDisplayLimit(50); }, [selectedFolder, searchQuery]);
+  const visibleEmails = displayEmails.slice(0, displayLimit);
   const selectedEmail = emails.find(e => e.id === selectedEmailId);
 
   return (
-    <div className={cx("flex h-screen w-screen bg-[var(--c-bg)] text-[var(--c-text)] font-sans overflow-hidden", theme === 'dark' && 'dark')}>
+    // onClick on root dismisses the context menu on any outside click
+    <div
+      className={cx("flex h-screen w-screen bg-[var(--c-bg)] text-[var(--c-text)] font-sans overflow-hidden", theme === 'dark' && 'dark')}
+      onClick={closeCtxMenu}
+    >
+      {/* Context menu overlay */}
+      {ctxMenu && (
+        <div
+          style={{ position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 9999 }}
+          className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-lg shadow-xl py-1 min-w-[180px]"
+          onClick={e => e.stopPropagation()}
+        >
+          {ctxMenu.type === 'email' && ctxMenu.emailTarget && (() => {
+            const e = ctxMenu.emailTarget!;
+            return (
+              <>
+                <CtxItem label={e.read ? 'Mark as Unread' : 'Mark as Read'} onClick={() => {
+                  invoke('mark_email_read', { id: e.id, read: !e.read }).catch(console.error);
+                  useMailStore.getState().selectEmail(e.read ? null : e.id);
+                  closeCtxMenu();
+                }} />
+                <CtxItem label="Reply" onClick={() => { handleReply(e); closeCtxMenu(); }} />
+                <CtxItem label="Forward" onClick={() => { handleForward(e); closeCtxMenu(); }} />
+                <div className="my-1 border-t border-[var(--c-border-subtle)]" />
+                <CtxItem label="Delete" danger onClick={() => { handleDeleteEmail(e); closeCtxMenu(); }} />
+              </>
+            );
+          })()}
+          {ctxMenu.type === 'account' && ctxMenu.accountTarget && (() => {
+            const acc = ctxMenu.accountTarget!;
+            return (
+              <>
+                <CtxItem label="Refresh" onClick={() => { handleManualSync(); closeCtxMenu(); }} />
+                <div className="my-1 border-t border-[var(--c-border-subtle)]" />
+                <CtxItem label="Remove Account" danger onClick={() => {
+                  if (window.confirm(`Remove account '${acc.name}'?`)) {
+                    invoke('delete_account', { id: acc.id }).then(() => {
+                      const s = useMailStore.getState();
+                      s.setAccounts(s.accounts.filter(a => a.id !== acc.id));
+                      s.setEmails(s.emails.filter(em => em.accountId !== acc.id));
+                    }).catch(console.error);
+                  }
+                  closeCtxMenu();
+                }} />
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       {/* LEFT PANE: SIDEBAR */}
       <div
         className="w-60 flex-shrink-0 flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
       >
         <div>
-          <div className="p-4 pt-8">
+          {/* Top action buttons: New Mail + Refresh */}
+          <div className="flex items-center gap-2 p-3 pt-6">
             <button
               onClick={() => openCompose()}
-              className="w-full flex items-center justify-center gap-2 bg-[#004f96] text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-[#003b73] transition-colors mb-4"
+              className="flex-1 flex items-center justify-center gap-1.5 bg-[#004f96] text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-[#003b73] transition-colors"
             >
               <PenSquare size={14} />
-              Compose
+              New Mail
+            </button>
+            <button
+              onClick={handleManualSync}
+              disabled={syncing}
+              title="Refresh all"
+              className="p-2 rounded-lg bg-[var(--c-bg)] border border-[var(--c-border)] text-[var(--c-text-muted)] hover:text-[var(--c-text)] transition-colors disabled:opacity-50"
+            >
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             </button>
           </div>
-          <div className="px-4">
+          <div className="px-4 mt-2">
             <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Favorites</h2>
             <nav className="space-y-0.5">
               <SidebarItem
@@ -337,13 +425,24 @@ export default function App() {
             <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Accounts</h2>
             <div className="flex-1 overflow-y-auto">
               {accounts.map(acc => (
-                <SidebarItem
+                <button
                   key={acc.id}
-                  icon={<Mail size={16} />}
-                  label={acc.email}
-                  active={false}
-                  count={emails.filter(e => e.accountId === acc.id && !e.read).length}
-                />
+                  style={{ width: 'calc(100% - 16px)' }}
+                  className="w-full flex items-center px-3 py-2 mx-2 rounded-md text-sm text-[var(--c-text-mid)] hover:bg-[var(--c-hover)] hover:text-[var(--c-text)] transition-colors text-left"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, type: 'account', accountTarget: acc });
+                  }}
+                >
+                  <span className="mr-3 flex-shrink-0 opacity-80"><Mail size={16} /></span>
+                  <span className="truncate flex-1">{acc.email}</span>
+                  {emails.filter(em => em.accountId === acc.id && !em.read).length > 0 && (
+                    <span className="ml-2 text-xs bg-[#004f96] text-white px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                      {emails.filter(em => em.accountId === acc.id && !em.read).length}
+                    </span>
+                  )}
+                </button>
               ))}
               <div className="mt-8 mb-4 border-t border-[var(--c-border)] pt-4"></div>
               <SidebarItem
@@ -373,19 +472,8 @@ export default function App() {
         <>
           {/* MIDDLE PANE: MESSAGE LIST */}
           <div className="w-[320px] flex-shrink-0 flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
-            <div className="border-b border-[var(--c-border)] px-4 py-2 shadow-sm z-10">
-              <div className="flex items-center justify-between mb-2">
-                <h1 className="text-lg font-semibold capitalize">{selectedFolder}</h1>
-                <button
-                  onClick={handleManualSync}
-                  disabled={syncing}
-                  className="p-1.5 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors disabled:opacity-50"
-                  title="Refresh"
-                >
-                  {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                </button>
-              </div>
-              {/* Search bar */}
+            {/* Search bar only — folder name + refresh moved to sidebar */}
+            <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
               <div className="flex items-center gap-2 bg-[var(--c-bg)] rounded-lg px-3 py-1.5">
                 <Search size={13} className="text-[var(--c-text-muted)] flex-shrink-0" />
                 <input
@@ -396,17 +484,20 @@ export default function App() {
                   className="bg-transparent text-sm flex-1 outline-none placeholder-[#a5a9b0]"
                 />
                 {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="text-[var(--c-text-muted)] hover:text-[var(--c-text)]">
-                    <X size={13} />
-                  </button>
+                  <button onClick={() => setSearchQuery('')} className="text-[var(--c-text-muted)] hover:text-[var(--c-text)]"><X size={13} /></button>
                 )}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {displayEmails.map(email => (
+              {visibleEmails.map(email => (
                 <div
                   key={email.id}
                   onClick={() => handleSelectEmail(email.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, type: 'email', emailTarget: email });
+                  }}
                   className={cx(
                     "p-4 border-b border-[var(--c-border-subtle)] cursor-pointer hover:bg-[var(--c-hover)] transition-colors relative",
                     selectedEmailId === email.id ? "bg-[var(--c-selected)] hover:bg-[var(--c-selected)]" : ""
@@ -417,19 +508,27 @@ export default function App() {
                   )}
                   <div className="flex justify-between items-baseline mb-1">
                     <span className={cx(
-                      "font-semibold truncate pr-2",
-                      !email.read ? "text-[#004f96]" : "text-[var(--c-text)]"
+                      "truncate pr-2",
+                      !email.read ? "font-semibold text-[#004f96]" : "font-normal text-[var(--c-text)]"
                     )}>
                       {email.sender}
                     </span>
-                    <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap">
+                    <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0">
                       {smartFormatTime(email.timestamp)}
                     </span>
                   </div>
-                  <div className="text-sm font-medium mb-1 truncate">{email.subject}</div>
+                  <div className={cx("text-sm mb-1 truncate", !email.read ? "font-medium" : "font-normal")}>{email.subject}</div>
                   <div className="text-sm text-[var(--c-text-mid)] truncate opacity-90">{email.preview}</div>
                 </div>
               ))}
+              {displayEmails.length > displayLimit && (
+                <button
+                  onClick={() => setDisplayLimit(n => n + 50)}
+                  className="w-full py-3 text-sm text-[var(--c-text-muted)] hover:text-[var(--c-text)] hover:bg-[var(--c-hover)] transition-colors"
+                >
+                  Load {Math.min(50, displayEmails.length - displayLimit)} more
+                </button>
+              )}
               {displayEmails.length === 0 && (
                 <div className="p-8 text-center text-[var(--c-text-muted)] text-sm mt-10">
                   {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder}`}
@@ -479,11 +578,10 @@ export default function App() {
                       <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'} • {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}</div>
                     </div>
                   </div>
-                  {/* Body: intercept link clicks so they open in the system browser instead
-                      of navigating the Tauri WebView. Also suppress images when showImages
-                      is off via the .hide-images CSS class. */}
+                  {/* Body: strip img tags (not CSS) when showImages is off
+                      so tracker pixel HTTP requests are never fired. */}
                   <div
-                    className={cx('text-[15px] leading-relaxed text-[var(--c-text)]', !showImages && 'hide-images')}
+                    className="text-[15px] leading-relaxed text-[var(--c-text)]"
                     onClick={(e) => {
                       const target = (e.target as HTMLElement).closest('a');
                       if (target?.href) {
@@ -494,7 +592,7 @@ export default function App() {
                     }}
                   >
                     {selectedEmail.bodyHtml ? (
-                      <div dangerouslySetInnerHTML={{ __html: selectedEmail.bodyHtml }} />
+                      <div dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(selectedEmail.bodyHtml, showImages) }} />
                     ) : (
                       <div className="whitespace-pre-wrap">{selectedEmail.bodyText}</div>
                     )}
@@ -513,6 +611,21 @@ export default function App() {
         </>
       )}
     </div>
+  );
+}
+
+// Context menu item helper
+function CtxItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cx(
+        'w-full text-left px-4 py-1.5 text-sm hover:bg-[var(--c-hover)] transition-colors',
+        danger ? 'text-red-500' : 'text-[var(--c-text)]'
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
