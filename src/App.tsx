@@ -252,6 +252,13 @@ export default function App() {
     return () => { cancelled = true; };
   }, [selectedFolder]);
 
+  // Show the window after first render.
+  // The window starts with visible:false in tauri.conf.json so Vite's
+  // dep-optimizer reload never produces a visible white screen.
+  useEffect(() => {
+    getCurrentWindow().show().catch(console.warn);
+  }, []);
+
   // Window resizing
   useEffect(() => {
     const adjustWindowSize = async () => {
@@ -341,6 +348,8 @@ export default function App() {
     searchDebounceRef.current = setTimeout(() => setSearchQuery(value), 300);
   }, [setSearchQuery]);
 
+  const selectedEmail = emails.find(e => e.id === selectedEmailId);
+
   // Attachments for the currently selected email
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [savingAttId, setSavingAttId] = useState<string | null>(null);
@@ -405,7 +414,55 @@ export default function App() {
   // Reset pagination when folder or search changes
   useEffect(() => { setDisplayLimit(50); }, [selectedFolder, searchQuery]);
   const visibleEmails = displayEmails.slice(0, displayLimit);
-  const selectedEmail = emails.find(e => e.id === selectedEmailId);
+
+  // Global keyboard shortcuts — skip when focus is in an input/textarea/contenteditable.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const editable = (e.target as HTMLElement).isContentEditable;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || editable) return;
+
+      const currentIdx = selectedEmailId
+        ? visibleEmails.findIndex(em => em.id === selectedEmailId)
+        : -1;
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown': {
+          e.preventDefault();
+          const next = visibleEmails[currentIdx + 1];
+          if (next) handleSelectEmail(next.id);
+          break;
+        }
+        case 'k':
+        case 'ArrowUp': {
+          e.preventDefault();
+          const prev = visibleEmails[currentIdx - 1];
+          if (prev) handleSelectEmail(prev.id);
+          break;
+        }
+        case 'r':
+          if (selectedEmail) { e.preventDefault(); handleReply(selectedEmail); }
+          break;
+        case 'f':
+          if (selectedEmail) { e.preventDefault(); handleForward(selectedEmail); }
+          break;
+        case 'd':
+        case 'Delete':
+          if (selectedEmail) { e.preventDefault(); handleDeleteEmail(selectedEmail); }
+          break;
+        case 'n':
+          e.preventDefault();
+          openCompose();
+          break;
+        case 'Escape':
+          selectEmail('');
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [visibleEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleForward, handleDeleteEmail, openCompose, selectEmail]);
 
   return (
     // onClick on root dismisses the context menu on any outside click

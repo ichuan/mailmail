@@ -9,6 +9,26 @@ export default defineConfig({
   clearScreen: false,
   server: { strictPort: true },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  // Pre-bundle all third-party deps so Vite never triggers a mid-session
+  // dep-optimization reload (which breaks Tauri WebView's __TAURI__ context → white screen).
+  // With the full dep list here, Vite has nothing new to discover at runtime.
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom/client',
+      'zustand',
+      'clsx',
+      'tailwind-merge',
+      'date-fns',
+      'lucide-react',
+      '@tauri-apps/api/core',
+      '@tauri-apps/api/event',
+      '@tauri-apps/api/path',
+      '@tauri-apps/api/window',
+      '@tauri-apps/api/dpi',
+      '@tauri-apps/plugin-shell',
+    ],
+  },
   build: {
     target: 'chrome105',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
