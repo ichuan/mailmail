@@ -30,6 +30,7 @@ import AddAccountView from './AddAccountView';
 import ComposeView from './ComposeView';
 import { Slot } from './core/slot-registry';
 import { initBuiltinPlugins, destroyPlugins } from './plugin-registry';
+import { pluginManager } from './core/plugin-manager';
 
 function cx(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -356,6 +357,19 @@ export default function App() {
                 <CtxItem label="Forward" onClick={() => { handleForward(e); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
                 <CtxItem label="Delete" danger onClick={() => { handleDeleteEmail(e); closeCtxMenu(); }} />
+                {pluginManager.getContextMenuItems('context-menu:email').length > 0 && (
+                  <>
+                    <div className="my-1 border-t border-[var(--c-border-subtle)]" />
+                    {pluginManager.getContextMenuItems('context-menu:email').map((item, i) => (
+                      <CtxItem
+                        key={`plugin-${item.pluginId}-${i}`}
+                        label={item.label}
+                        danger={item.danger}
+                        onClick={() => { pluginManager.executeCommand(`${item.pluginId}.${item.command}`, e); closeCtxMenu(); }}
+                      />
+                    ))}
+                  </>
+                )}
               </>
             );
           })()}
@@ -375,6 +389,19 @@ export default function App() {
                   }
                   closeCtxMenu();
                 }} />
+                {pluginManager.getContextMenuItems('context-menu:account').length > 0 && (
+                  <>
+                    <div className="my-1 border-t border-[var(--c-border-subtle)]" />
+                    {pluginManager.getContextMenuItems('context-menu:account').map((item, i) => (
+                      <CtxItem
+                        key={`plugin-${item.pluginId}-${i}`}
+                        label={item.label}
+                        danger={item.danger}
+                        onClick={() => { pluginManager.executeCommand(`${item.pluginId}.${item.command}`, acc); closeCtxMenu(); }}
+                      />
+                    ))}
+                  </>
+                )}
               </>
             );
           })()}
