@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { eventBus } from './core/event-bus';
 
 export interface Email {
   id: string;
@@ -77,33 +78,59 @@ export const useMailStore = create<MailStore>((set) => ({
   syncing: false,
   composeState: null,
   searchQuery: '',
-  setFolder: (folder) => set({ selectedFolder: folder, selectedEmailId: null, activeView: 'mail', searchQuery: '' }),
-  selectEmail: (id) => set((state) => ({
-    selectedEmailId: id,
-    emails: state.emails.map(e => e.id === id ? { ...e, read: true } : e)
-  })),
+  setFolder: (folder) => {
+    set({ selectedFolder: folder, selectedEmailId: null, activeView: 'mail', searchQuery: '' });
+    eventBus.emit('folder:changed', { folder });
+  },
+  selectEmail: (id) => set((state) => {
+    const email = state.emails.find(e => e.id === id);
+    if (email) {
+      eventBus.emit('email:selected', { email: { ...email, read: true } });
+    }
+    return {
+      selectedEmailId: id,
+      emails: state.emails.map(e => e.id === id ? { ...e, read: true } : e),
+    };
+  }),
   addEmails: (newEmails) => set((state) => ({ emails: [...state.emails, ...newEmails] })),
   setView: (view) => set({ activeView: view }),
-  setAccounts: (accounts) => set({ accounts }),
+  setAccounts: (accounts) => {
+    set({ accounts });
+  },
   setEmails: (emails) => set({ emails }),
   setSyncLimitDays: (days) => set({ syncLimitDays: days }),
-  setShowImages: (show) => set({ showImages: show }),
-  setTheme: (theme) => set({ theme }),
-  setSyncing: (syncing) => set({ syncing }),
-  openCompose: (composeInit) => set({
-    activeView: 'compose',
-    composeState: { to: '', subject: '', body: '', ...composeInit },
-  }),
-  closeCompose: () => set({ activeView: 'mail', composeState: null }),
+  setShowImages: (show) => {
+    set({ showImages: show });
+    eventBus.emit('settings:changed', { key: 'showImages', value: show });
+  },
+  setTheme: (theme) => {
+    set({ theme });
+    eventBus.emit('settings:changed', { key: 'theme', value: theme });
+  },
+  setSyncing: (syncing) => {
+    set({ syncing });
+  },
+  openCompose: (composeInit) => {
+    const draft = { to: '', subject: '', body: '', ...composeInit };
+    set({ activeView: 'compose', composeState: draft });
+    eventBus.emit('compose:open', { draft });
+  },
+  closeCompose: () => {
+    set({ activeView: 'mail', composeState: null });
+    eventBus.emit('compose:close', {} as Record<string, never>);
+  },
   // Merge new emails without duplicating by accountId+folder+uid
   mergeEmails: (newEmails) => set((state) => {
     const existing = new Set(state.emails.map(e => `${e.accountId}:${e.folder}:${e.uid}`));
     const unique = newEmails.filter(e => !existing.has(`${e.accountId}:${e.folder}:${e.uid}`));
     return { emails: [...state.emails, ...unique] };
   }),
-  removeEmail: (id) => set((state) => ({
-    emails: state.emails.filter(e => e.id !== id),
-    selectedEmailId: state.selectedEmailId === id ? null : state.selectedEmailId,
-  })),
+  removeEmail: (id) => {
+    set((state) => ({
+      emails: state.emails.filter(e => e.id !== id),
+      selectedEmailId: state.selectedEmailId === id ? null : state.selectedEmailId,
+    }));
+    eventBus.emit('email:deleted', { emailId: id });
+  },
   setSearchQuery: (query) => set({ searchQuery: query }),
 }));
