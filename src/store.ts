@@ -44,6 +44,7 @@ interface MailStore {
   activeView: 'mail' | 'settings' | 'add_account' | 'compose';
   syncLimitDays: number;
   showImages: boolean;
+  theme: 'light' | 'dark';
   syncing: boolean;
   composeState: ComposeState | null;
   searchQuery: string;
@@ -55,6 +56,7 @@ interface MailStore {
   setEmails: (emails: Email[]) => void;
   setSyncLimitDays: (days: number) => void;
   setShowImages: (show: boolean) => void;
+  setTheme: (theme: 'light' | 'dark') => void;
   setSyncing: (syncing: boolean) => void;
   openCompose: (state?: Partial<ComposeState>) => void;
   closeCompose: () => void;
@@ -71,6 +73,7 @@ export const useMailStore = create<MailStore>((set) => ({
   activeView: 'mail',
   syncLimitDays: 30,
   showImages: false,
+  theme: 'light',
   syncing: false,
   composeState: null,
   searchQuery: '',
@@ -85,6 +88,7 @@ export const useMailStore = create<MailStore>((set) => ({
   setEmails: (emails) => set({ emails }),
   setSyncLimitDays: (days) => set({ syncLimitDays: days }),
   setShowImages: (show) => set({ showImages: show }),
+  setTheme: (theme) => set({ theme }),
   setSyncing: (syncing) => set({ syncing }),
   openCompose: (composeInit) => set({
     activeView: 'compose',

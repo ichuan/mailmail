@@ -13,6 +13,37 @@
   --color-primary-fixed: #d5e3ff;
 }
 
+/* ─── Theme color tokens ───────────────────────────────────────────────────── */
+/* Referenced in components as bg-[var(--c-bg)], text-[var(--c-text)], etc.   */
+:root {
+  --c-bg:           #f3f3f3;
+  --c-panel:        #ffffff;
+  --c-sidebar-bg:   rgba(255, 255, 255, 0.5);
+  --c-text:         #1a1c1c;
+  --c-text-muted:   #717783;
+  --c-text-mid:     #414752;
+  --c-border:       #e2e2e2;
+  --c-border-subtle:#f1f1f1;
+  --c-selected:     #d5e3ff;
+  --c-selected-text:#001c3b;
+  --c-hover:        #f3f3f3;
+}
+
+/* Dark theme overrides — applied when the root element has class="dark" */
+.dark {
+  --c-bg:           #1e1e1e;
+  --c-panel:        #252525;
+  --c-sidebar-bg:   rgba(30, 30, 30, 0.85);
+  --c-text:         #e8e8e8;
+  --c-text-muted:   #9aa0aa;
+  --c-text-mid:     #8a9099;
+  --c-border:       #383838;
+  --c-border-subtle:#2d2d2d;
+  --c-selected:     #1a3056;
+  --c-selected-text:#a8c5f0;
+  --c-hover:        #2d2d2d;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
@@ -39,7 +70,9 @@ html, body, #root {
   background: rgba(0,0,0,0.2);
 }
 
-/* When "Show Images" is disabled, hide all img tags inside email bodies */
+/* When "Show Images" is disabled, hide all img tags inside email bodies.
+   !important is required because HTML emails often have inline style="display:block"
+   on <img> elements, which would otherwise override a plain display:none rule. */
 .hide-images img {
-  display: none;
+  display: none !important;
 }

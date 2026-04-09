@@ -75,6 +75,7 @@ export default function App() {
     activeView,
     syncLimitDays,
     showImages,
+    theme,
     syncing,
     searchQuery,
     setFolder,
@@ -84,6 +85,7 @@ export default function App() {
     setEmails,
     setSyncLimitDays,
     setShowImages,
+    setTheme,
     setSyncing,
     openCompose,
     removeEmail,
@@ -104,6 +106,11 @@ export default function App() {
         const savedShowImages = await invoke<string | null>('get_setting', { key: 'showImages' });
         if (savedShowImages !== null) {
           setShowImages(savedShowImages === 'true');
+        }
+        // Load persisted theme preference
+        const savedTheme = await invoke<string | null>('get_setting', { key: 'theme' });
+        if (savedTheme === 'dark' || savedTheme === 'light') {
+          setTheme(savedTheme);
         }
 
         const loadedAccounts = await invoke<Account[]>('get_accounts');
@@ -285,11 +292,11 @@ export default function App() {
   const selectedEmail = emails.find(e => e.id === selectedEmailId);
 
   return (
-    <div className="flex h-screen w-screen bg-[#f3f3f3] text-[#1a1c1c] font-sans overflow-hidden">
+    <div className={cx("flex h-screen w-screen bg-[var(--c-bg)] text-[var(--c-text)] font-sans overflow-hidden", theme === 'dark' && 'dark')}>
 
       {/* LEFT PANE: SIDEBAR */}
       <div
-        className="w-60 flex-shrink-0 flex flex-col justify-between border-r border-[#e2e2e2] backdrop-blur-xl bg-white/50"
+        className="w-60 flex-shrink-0 flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
       >
         <div>
           <div className="p-4 pt-8">
@@ -302,7 +309,7 @@ export default function App() {
             </button>
           </div>
           <div className="px-4">
-            <h2 className="text-xs font-semibold tracking-wider text-[#414752] uppercase mb-2 ml-2">Favorites</h2>
+            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Favorites</h2>
             <nav className="space-y-0.5">
               <SidebarItem
                 icon={<Inbox size={16} />}
@@ -327,7 +334,7 @@ export default function App() {
           </div>
 
           <div className="p-4">
-            <h2 className="text-xs font-semibold tracking-wider text-[#414752] uppercase mb-2 ml-2">Accounts</h2>
+            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Accounts</h2>
             <div className="flex-1 overflow-y-auto">
               {accounts.map(acc => (
                 <SidebarItem
@@ -338,7 +345,7 @@ export default function App() {
                   count={emails.filter(e => e.accountId === acc.id && !e.read).length}
                 />
               ))}
-              <div className="mt-8 mb-4 border-t border-[#e2e2e2] pt-4"></div>
+              <div className="mt-8 mb-4 border-t border-[var(--c-border)] pt-4"></div>
               <SidebarItem
                 icon={<Settings size={16} />}
                 label="Settings"
@@ -351,36 +358,36 @@ export default function App() {
       </div>
 
       {activeView === 'settings' ? (
-        <div className="flex-1 bg-[#ffffff] h-full overflow-y-auto w-full relative z-50">
+        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
            <SettingsView />
         </div>
       ) : activeView === 'add_account' ? (
-        <div className="flex-1 bg-[#ffffff] h-full overflow-y-auto w-full relative z-50">
+        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
            <AddAccountView />
         </div>
       ) : activeView === 'compose' ? (
-        <div className="flex-1 bg-[#ffffff] h-full overflow-y-auto w-full relative z-50">
+        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
            <ComposeView />
         </div>
       ) : (
         <>
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <div className="w-[320px] flex-shrink-0 flex flex-col bg-white border-r border-[#e2e2e2]">
-            <div className="border-b border-[#e2e2e2] px-4 py-2 shadow-sm z-10">
+          <div className="w-[320px] flex-shrink-0 flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
+            <div className="border-b border-[var(--c-border)] px-4 py-2 shadow-sm z-10">
               <div className="flex items-center justify-between mb-2">
                 <h1 className="text-lg font-semibold capitalize">{selectedFolder}</h1>
                 <button
                   onClick={handleManualSync}
                   disabled={syncing}
-                  className="p-1.5 hover:bg-[#f3f3f3] rounded-md text-[#717783] transition-colors disabled:opacity-50"
+                  className="p-1.5 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors disabled:opacity-50"
                   title="Refresh"
                 >
                   {syncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                 </button>
               </div>
               {/* Search bar */}
-              <div className="flex items-center gap-2 bg-[#f3f3f3] rounded-lg px-3 py-1.5">
-                <Search size={13} className="text-[#717783] flex-shrink-0" />
+              <div className="flex items-center gap-2 bg-[var(--c-bg)] rounded-lg px-3 py-1.5">
+                <Search size={13} className="text-[var(--c-text-muted)] flex-shrink-0" />
                 <input
                   type="text"
                   placeholder="Search"
@@ -389,7 +396,7 @@ export default function App() {
                   className="bg-transparent text-sm flex-1 outline-none placeholder-[#a5a9b0]"
                 />
                 {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="text-[#717783] hover:text-[#1a1c1c]">
+                  <button onClick={() => setSearchQuery('')} className="text-[var(--c-text-muted)] hover:text-[var(--c-text)]">
                     <X size={13} />
                   </button>
                 )}
@@ -401,8 +408,8 @@ export default function App() {
                   key={email.id}
                   onClick={() => handleSelectEmail(email.id)}
                   className={cx(
-                    "p-4 border-b border-[#f1f1f1] cursor-pointer hover:bg-[#f3f3f3] transition-colors relative",
-                    selectedEmailId === email.id ? "bg-[#d5e3ff] hover:bg-[#d5e3ff]" : ""
+                    "p-4 border-b border-[var(--c-border-subtle)] cursor-pointer hover:bg-[var(--c-hover)] transition-colors relative",
+                    selectedEmailId === email.id ? "bg-[var(--c-selected)] hover:bg-[var(--c-selected)]" : ""
                   )}
                 >
                   {selectedEmailId === email.id && (
@@ -411,20 +418,20 @@ export default function App() {
                   <div className="flex justify-between items-baseline mb-1">
                     <span className={cx(
                       "font-semibold truncate pr-2",
-                      !email.read ? "text-[#004f96]" : "text-[#1a1c1c]"
+                      !email.read ? "text-[#004f96]" : "text-[var(--c-text)]"
                     )}>
                       {email.sender}
                     </span>
-                    <span className="text-xs text-[#717783] whitespace-nowrap">
+                    <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap">
                       {smartFormatTime(email.timestamp)}
                     </span>
                   </div>
                   <div className="text-sm font-medium mb-1 truncate">{email.subject}</div>
-                  <div className="text-sm text-[#414752] truncate opacity-90">{email.preview}</div>
+                  <div className="text-sm text-[var(--c-text-mid)] truncate opacity-90">{email.preview}</div>
                 </div>
               ))}
               {displayEmails.length === 0 && (
-                <div className="p-8 text-center text-[#717783] text-sm mt-10">
+                <div className="p-8 text-center text-[var(--c-text-muted)] text-sm mt-10">
                   {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder}`}
                 </div>
               )}
@@ -432,28 +439,28 @@ export default function App() {
           </div>
 
           {/* RIGHT PANE: READING VIEW */}
-          <div className="flex-1 flex flex-col bg-white">
+          <div className="flex-1 flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
-                <div className="h-14 border-b border-[#e2e2e2] flex items-center px-6 justify-between flex-shrink-0">
+                <div className="h-14 border-b border-[var(--c-border)] flex items-center px-6 justify-between flex-shrink-0">
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleReply(selectedEmail)}
-                      className="p-2 hover:bg-[#f3f3f3] rounded-md transition-colors text-[#414752]"
+                      className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)]"
                       title="Reply"
                     >
                       <Reply size={18} />
                     </button>
                     <button
                       onClick={() => handleForward(selectedEmail)}
-                      className="p-2 hover:bg-[#f3f3f3] rounded-md transition-colors text-[#414752]"
+                      className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)]"
                       title="Forward"
                     >
                       <Forward size={18} />
                     </button>
                     <button
                       onClick={() => handleDeleteEmail(selectedEmail)}
-                      className="p-2 hover:bg-[#fff0f0] rounded-md transition-colors text-[#414752] hover:text-red-600"
+                      className="p-2 hover:bg-[#fff0f0] rounded-md transition-colors text-[var(--c-text-mid)] hover:text-red-600"
                       title="Delete"
                     >
                       <Trash size={18} />
@@ -463,20 +470,20 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto p-8">
                   <h1 className="text-2xl font-bold mb-6">{selectedEmail.subject}</h1>
-                  <div className="flex items-center mb-8 pb-6 border-b border-[#e2e2e2]">
-                    <div className="h-10 w-10 bg-[#f3f3f3] rounded-full flex items-center justify-center text-[#414752] mr-4">
+                  <div className="flex items-center mb-8 pb-6 border-b border-[var(--c-border)]">
+                    <div className="h-10 w-10 bg-[var(--c-bg)] rounded-full flex items-center justify-center text-[var(--c-text-mid)] mr-4">
                       <CircleUserRound size={24} />
                     </div>
                     <div>
                       <div className="font-semibold">{selectedEmail.sender}</div>
-                      <div className="text-sm text-[#717783]">to {selectedEmail.recipient || 'me'} • {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}</div>
+                      <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'} • {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}</div>
                     </div>
                   </div>
                   {/* Body: intercept link clicks so they open in the system browser instead
                       of navigating the Tauri WebView. Also suppress images when showImages
                       is off via the .hide-images CSS class. */}
                   <div
-                    className={cx('text-[15px] leading-relaxed text-[#1a1c1c]', !showImages && 'hide-images')}
+                    className={cx('text-[15px] leading-relaxed text-[var(--c-text)]', !showImages && 'hide-images')}
                     onClick={(e) => {
                       const target = (e.target as HTMLElement).closest('a');
                       if (target?.href) {
@@ -495,7 +502,7 @@ export default function App() {
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-[#717783]">
+              <div className="flex-1 flex items-center justify-center text-[var(--c-text-muted)]">
                 <div className="text-center">
                   <Mail size={48} className="mx-auto mb-4 opacity-20" />
                   <p>Select an item to read</p>
@@ -516,12 +523,12 @@ function SidebarItem({ icon, label, active, onClick, count }: { icon: React.Reac
       className={cx(
         "w-full flex items-center px-3 py-2 mx-2 rounded-md text-sm transition-colors text-left",
         active
-          ? "bg-[#d5e3ff] text-[#001c3b] font-medium"
-          : "text-[#414752] hover:bg-[#e8e8e8]/50 hover:text-[#1a1c1c]"
+          ? "bg-[var(--c-selected)] text-[var(--c-selected-text)] font-medium"
+          : "text-[var(--c-text-mid)] hover:bg-[var(--c-hover)] hover:text-[var(--c-text)]"
       )}
       style={{ width: 'calc(100% - 16px)' }}
     >
-      <span className={cx("mr-3", active ? "text-[#004f96]" : "opacity-80")}>
+      <span className={cx("mr-3 flex-shrink-0", active ? "text-[#004f96]" : "opacity-80")}>
         {icon}
       </span>
       <span className="truncate flex-1">{label}</span>
