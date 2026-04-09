@@ -2,6 +2,7 @@
 import { useMailStore } from './store';
 import { HelpCircle, Bell, Mail, Monitor, Shield, Trash2, KeyRound, Plus, Image, Sun, Moon } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { Slot } from './core/slot-registry';
 
 export default function SettingsView() {
   const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
@@ -198,6 +199,8 @@ export default function SettingsView() {
             </div>
           </div>
         </section>
+        {/* settings:sections slot — plugins can append sections here */}
+        <Slot id="settings:sections" />
       </div>
     </div>
   );

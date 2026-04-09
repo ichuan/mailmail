@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
 import { X, Send } from 'lucide-react';
+import { Slot } from './core/slot-registry';
 
 export default function ComposeView() {
   const { accounts, composeState, closeCompose } = useMailStore();
@@ -109,6 +110,8 @@ export default function ComposeView() {
               className="w-full min-h-[400px] p-3 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] resize-none leading-relaxed bg-[var(--c-panel)] text-[var(--c-text)]"
               placeholder="Write your message..."
             />
+            {/* compose:footer slot — plugins (e.g. signature picker) render here */}
+            <Slot id="compose:footer" body={body} setBody={setBody} />
           </div>
         </div>
       </div>

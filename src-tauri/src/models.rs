@@ -35,6 +35,15 @@ pub struct Email {
     pub starred: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Signature {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    pub is_default: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

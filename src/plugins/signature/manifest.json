@@ -1,0 +1,6 @@
+{
+  "id": "signature",
+  "name": "Signature Templates",
+  "description": "Manage email signature templates and insert them into compose.",
+  "permissions": ["email:read", "email:modify-metadata", "ui:slot"]
+}
