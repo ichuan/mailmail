@@ -120,6 +120,13 @@ export default function App() {
     return () => destroyPlugins();
   }, []);
 
+  // Keep window title in sync with total unread count across all loaded emails.
+  useEffect(() => {
+    const unread = emails.filter(e => !e.read).length;
+    const title = unread > 0 ? `MailMail (${unread})` : 'MailMail';
+    getCurrentWindow().setTitle(title).catch(console.warn);
+  }, [emails]);
+
   // Load persisted settings + accounts on startup
   useEffect(() => {
     async function loadData() {
@@ -454,6 +461,14 @@ export default function App() {
         case 'n':
           e.preventDefault();
           openCompose();
+          break;
+        case 'u':
+          if (selectedEmail) {
+            e.preventDefault();
+            const nextRead = !selectedEmail.read;
+            invoke('mark_email_read', { id: selectedEmail.id, read: nextRead }).catch(console.error);
+            useMailStore.getState().markEmailRead(selectedEmail.id, nextRead);
+          }
           break;
         case 'Escape':
           selectEmail('');
