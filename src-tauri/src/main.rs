@@ -10,7 +10,7 @@ mod plugin_host;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Manager, State};
-use crate::models::{Account, Email};
+use crate::models::{Account, Email, Signature};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 
 struct AppState {
@@ -160,6 +160,24 @@ async fn toggle_star(state: State<'_, Arc<AppState>>, id: String, starred: bool)
     get_db(&guard)?.toggle_star(&id, starred).await
 }
 
+#[tauri::command]
+async fn get_signatures(state: State<'_, Arc<AppState>>) -> Result<Vec<Signature>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.get_signatures().await
+}
+
+#[tauri::command]
+async fn save_signature(state: State<'_, Arc<AppState>>, signature: Signature) -> Result<(), String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.upsert_signature(&signature).await
+}
+
+#[tauri::command]
+async fn delete_signature(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.delete_signature(&id).await
+}
+
 fn main() {
     let mut host = PluginHost::new();
     host.register(Box::new(TrackingPixelStripper));
@@ -185,6 +203,9 @@ fn main() {
             save_setting,
             mark_email_read,
             toggle_star,
+            get_signatures,
+            save_signature,
+            delete_signature,
             get_cached_emails,
             delete_email,
             search_emails,

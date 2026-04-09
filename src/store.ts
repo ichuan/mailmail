@@ -38,6 +38,13 @@ export interface ComposeState {
   fromAccountId?: string;
 }
 
+export interface Signature {
+  id: string;
+  name: string;
+  content: string;
+  isDefault: boolean;
+}
+
 interface MailStore {
   accounts: Account[];
   emails: Email[];
@@ -49,6 +56,7 @@ interface MailStore {
   theme: 'light' | 'dark';
   syncing: boolean;
   composeState: ComposeState | null;
+  signatures: Signature[];
   searchQuery: string;
   setFolder: (folder: string) => void;
   selectEmail: (id: string | null) => void;
@@ -67,6 +75,7 @@ interface MailStore {
   markEmailRead: (id: string, read: boolean) => void;
   toggleStar: (id: string, starred: boolean) => void;
   setSearchQuery: (query: string) => void;
+  setSignatures: (sigs: Signature[]) => void;
 }
 
 export const useMailStore = create<MailStore>((set) => ({
@@ -80,6 +89,7 @@ export const useMailStore = create<MailStore>((set) => ({
   theme: 'light',
   syncing: false,
   composeState: null,
+  signatures: [],
   searchQuery: '',
   setFolder: (folder) => {
     set({ selectedFolder: folder, selectedEmailId: null, activeView: 'mail', searchQuery: '' });
@@ -146,4 +156,5 @@ export const useMailStore = create<MailStore>((set) => ({
     }));
   },
   setSearchQuery: (query) => set({ searchQuery: query }),
+  setSignatures: (sigs) => set({ signatures: sigs }),
 }));

@@ -71,6 +71,14 @@ impl Db {
                 value TEXT NOT NULL
             );
             "#,
+            r#"
+            CREATE TABLE IF NOT EXISTS signatures (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0
+            );
+            "#,
         ];
 
         for q in queries {
@@ -324,6 +332,55 @@ impl Db {
             });
         }
         Ok(emails)
+    }
+
+    pub async fn get_signatures(&self) -> Result<Vec<crate::models::Signature>, String> {
+        let rows = sqlx::query("SELECT id, name, content, is_default FROM signatures ORDER BY name ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut sigs = Vec::new();
+        for row in rows {
+            sigs.push(crate::models::Signature {
+                id: row.try_get("id").map_err(|e| e.to_string())?,
+                name: row.try_get("name").map_err(|e| e.to_string())?,
+                content: row.try_get("content").map_err(|e| e.to_string())?,
+                is_default: row.try_get::<bool, _>("is_default").unwrap_or(false),
+            });
+        }
+        Ok(sigs)
+    }
+
+    /// Insert or replace a signature. If is_default is true, clears is_default from all others first.
+    pub async fn upsert_signature(&self, sig: &crate::models::Signature) -> Result<(), String> {
+        if sig.is_default {
+            sqlx::query("UPDATE signatures SET is_default = 0")
+                .execute(&self.pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        sqlx::query(
+            "INSERT INTO signatures (id, name, content, is_default) VALUES (?, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name, content=excluded.content, is_default=excluded.is_default"
+        )
+        .bind(&sig.id)
+        .bind(&sig.name)
+        .bind(&sig.content)
+        .bind(sig.is_default)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_signature(&self, id: &str) -> Result<(), String> {
+        sqlx::query("DELETE FROM signatures WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
