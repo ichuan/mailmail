@@ -1,6 +1,8 @@
 import { pluginManager } from './core/plugin-manager';
 import themeSwitcherPlugin from './plugins/theme-switcher/index';
 import themeSwitcherManifest from './plugins/theme-switcher/manifest.json';
+import imageTogglePlugin from './plugins/image-toggle/index';
+import imageToggleManifest from './plugins/image-toggle/manifest.json';
 import type { PluginManifest } from './core/plugin-api';
 
 /**
@@ -9,6 +11,7 @@ import type { PluginManifest } from './core/plugin-api';
  */
 export function initBuiltinPlugins(): void {
   pluginManager.register(themeSwitcherManifest as PluginManifest, themeSwitcherPlugin);
+  pluginManager.register(imageToggleManifest as PluginManifest, imageTogglePlugin);
 
   pluginManager.activateAll();
 }
