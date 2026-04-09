@@ -1,0 +1,6 @@
+{
+  "id": "notification",
+  "name": "Desktop Notifications",
+  "description": "Shows a desktop notification when new unread emails arrive.",
+  "permissions": ["email:read", "ui:slot"]
+}
