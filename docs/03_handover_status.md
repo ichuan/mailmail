@@ -1,8 +1,8 @@
 # AI Handover Status & Technical Context
 *This document contains critical implementation details for the next AI assistant.*
 
-## 🏁 Current Status: STRETCH 3 (Cache, Delete, Search)
-All previously listed features are complete. Three new capabilities added this session.
+## 🏁 Current Status: Plugin Architecture (Phase 1–4 Complete)
+All previously listed features are complete. Plugin system fully implemented.
 
 ### ✅ Completed Milestones
 1.  **Account CRUD**: Full SQLite integration. Deletion works with cascading foreign keys enabled.
@@ -33,6 +33,14 @@ All previously listed features are complete. Three new capabilities added this s
 11. **Test Coverage**:
     - **Rust (13 tests)**: all previous + `test_search_emails`.
     - **Frontend (12 tests)**: all previous + `removeEmail`, `clear selection on delete`, `search query / folder reset`.
+12. **Plugin Architecture (Phase 1–4)**:
+    - **Core Infrastructure**: EventBus (17 typed events), SlotRegistry (`<Slot>` React component), PluginManager (lifecycle + permission-gated PluginAPI), Permissions module.
+    - **Store Integration**: Zustand actions emit EventBus events (folder:changed, email:selected, compose:open/close, email:deleted, settings:changed).
+    - **UI Slots**: 5 extension points in App.tsx (sidebar:top/bottom, toolbar:actions, email-detail:header/footer).
+    - **Built-in TS Plugins**: theme-switcher (sidebar:bottom), image-toggle (toolbar:actions).
+    - **Context Menu Extensibility**: Plugin-contributed items rendered alongside built-in context menu entries.
+    - **Rust Backend Plugins**: `MailPlugin` trait with 3 pipeline hooks (on_emails_fetched, on_email_before_display, on_email_before_send). `PluginHost` wired into sync_inbox, sync_folder, send_email. TrackingPixelStripper built-in strips 1×1 tracking pixels.
+    - **Test Coverage**: 62 Vitest tests (8 files) + 19 Rust tests.
 
 ---
 
