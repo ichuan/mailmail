@@ -57,18 +57,44 @@ async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, S
     let guard = state.db.lock().await;
     let db = get_db(&guard)?;
     let mut accounts = db.get_accounts().await?;
-    // Migrate plaintext passwords to OS keychain on first run after upgrade.
     for account in &mut accounts {
-        if account.password != "KEYCHAIN" && !account.password.is_empty() {
+        if account.password == "KEYCHAIN" {
+            // Verify that the keychain entry still exists. If it was stored in a
+            // non-persistent backend (e.g. mock keychain in one build, then wiped),
+            // the entry will be gone. Clear the sentinel so later IMAP operations
+            // fail with a clear "invalid credentials" rather than a cryptic
+            // "No matching entry in secure storage" from every command handler.
+            let id = account.id.clone();
+            let ok = tokio::task::spawn_blocking(move || keychain::get_password(&id))
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+            if !ok {
+                log::warn!(
+                    "Keychain entry missing for {}; clearing sentinel. Re-add the account to restore access.",
+                    account.email
+                );
+                db.set_account_password(&account.id, "").await.ok();
+                account.password = "".to_string();
+            }
+        } else if !account.password.is_empty() {
+            // Plaintext password still in DB — migrate to OS keychain.
             let id = account.id.clone();
             let pw = account.password.clone();
-            let stored = tokio::task::spawn_blocking(move || keychain::store_password(&id, &pw))
-                .await
-                .map_err(|e| e.to_string())?;
+            let id2 = id.clone();
+            let stored = tokio::task::spawn_blocking(move || {
+                keychain::store_password(&id, &pw)?;
+                // Verify the entry is immediately readable; some backends (mock)
+                // accept writes but don't persist across restarts.
+                keychain::get_password(&id2)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
             if stored.is_ok() {
                 db.set_account_password(&account.id, "KEYCHAIN").await.ok();
                 account.password = "KEYCHAIN".to_string();
             }
+            // If verify-read failed, leave plaintext in DB — safer than losing it.
         }
     }
     Ok(accounts)
@@ -81,12 +107,22 @@ async fn add_account(
     mut account: Account,
 ) -> Result<(), String> {
     // Store real password in OS keychain; persist only the sentinel in SQLite.
+    // Verify that the keychain is actually persistent by reading back immediately.
     let id = account.id.clone();
     let pw = account.password.clone();
-    tokio::task::spawn_blocking(move || keychain::store_password(&id, &pw))
-        .await
-        .map_err(|e| e.to_string())??;
-    account.password = "KEYCHAIN".to_string();
+    let id2 = id.clone();
+    let keychain_ok = tokio::task::spawn_blocking(move || {
+        keychain::store_password(&id, &pw)?;
+        keychain::get_password(&id2)
+    })
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false);
+    if keychain_ok {
+        account.password = "KEYCHAIN".to_string();
+    } else {
+        log::warn!("Keychain unavailable for {}; keeping plaintext password in DB.", account.email);
+    }
     {
         let guard = state.db.lock().await;
         get_db(&guard)?.insert_account(&account).await?;
@@ -113,6 +149,14 @@ async fn delete_account(state: State<'_, Arc<AppState>>, id: String) -> Result<(
         log::info!("IDLE: watcher aborted for account {}", id);
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn test_connection(account: Account) -> Result<String, String> {
+    // Password is plain text here — this is called before the account is saved,
+    // so there is no keychain entry yet. No hydration needed.
+    imap::test_connection(&account).await?;
+    Ok(format!("Connected to {} successfully", account.imap_server))
 }
 
 #[tauri::command]
@@ -312,6 +356,7 @@ fn main() {
             get_accounts,
             add_account,
             delete_account,
+            test_connection,
             sync_inbox,
             sync_folder,
             list_folders,
