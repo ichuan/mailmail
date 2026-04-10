@@ -1,0 +1,7 @@
+{
+  "id": "print",
+  "name": "Print Email",
+  "version": "1.0.0",
+  "description": "Print the currently selected email via the native OS print dialog",
+  "permissions": ["email:read", "ui:slot"]
+}
