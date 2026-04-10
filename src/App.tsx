@@ -322,6 +322,15 @@ export default function App() {
     }
   };
 
+  // Sync error banner (auto-dismisses after 7 s)
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const syncErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSyncError = useCallback((msg: string) => {
+    if (syncErrorTimerRef.current) clearTimeout(syncErrorTimerRef.current);
+    setSyncError(msg);
+    syncErrorTimerRef.current = setTimeout(() => setSyncError(null), 7000);
+  }, []);
+
   const handleReply = useCallback((email: Email) => {
     const replyTo = email.senderEmail || email.sender;
     const dateStr = format(new Date(email.timestamp), "EEE, MMM d, yyyy 'at' h:mm a");
@@ -459,15 +468,6 @@ export default function App() {
       if (next.has(id)) { next.delete(id); } else { next.add(id); }
       return next;
     });
-  }, []);
-
-  // Sync error banner (auto-dismisses after 7 s)
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const syncErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showSyncError = useCallback((msg: string) => {
-    if (syncErrorTimerRef.current) clearTimeout(syncErrorTimerRef.current);
-    setSyncError(msg);
-    syncErrorTimerRef.current = setTimeout(() => setSyncError(null), 7000);
   }, []);
 
   // Load more pagination
