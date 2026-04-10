@@ -31,6 +31,7 @@ import {
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 import SettingsView from './SettingsView';
 import AddAccountView from './AddAccountView';
@@ -571,9 +572,6 @@ export default function App() {
     });
   }, []);
 
-  // Load more pagination
-  const [displayLimit, setDisplayLimit] = useState(50);
-
   const displayEmails = emails.filter(e => {
     // For the unified inbox, show all inbox-folder emails regardless of account.
     // For starred, show all starred emails across folders.
@@ -595,9 +593,19 @@ export default function App() {
       (e.bodyText ?? '').toLowerCase().includes(q)
     );
   }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  // Reset pagination when folder or search changes
-  useEffect(() => { setDisplayLimit(50); }, [selectedFolder, searchQuery]);
-  const visibleEmails = displayEmails.slice(0, displayLimit);
+  // Reset scroll position when folder or search changes
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listScrollRef.current?.scrollTo(0, 0);
+  }, [selectedFolder, searchQuery]);
+
+  // Virtual scrolling — only render visible email rows
+  const emailListVirtualizer = useVirtualizer({
+    count: displayEmails.length,
+    getScrollElement: () => listScrollRef.current,
+    estimateSize: () => 72,
+    overscan: 5,
+  });
 
   // Global keyboard shortcuts — skip when focus is in an input/textarea/contenteditable.
   useEffect(() => {
@@ -607,21 +615,21 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || editable) return;
 
       const currentIdx = selectedEmailId
-        ? visibleEmails.findIndex(em => em.id === selectedEmailId)
+        ? displayEmails.findIndex(em => em.id === selectedEmailId)
         : -1;
 
       switch (e.key) {
         case 'j':
         case 'ArrowDown': {
           e.preventDefault();
-          const next = visibleEmails[currentIdx + 1];
+          const next = displayEmails[currentIdx + 1];
           if (next) handleSelectEmail(next.id);
           break;
         }
         case 'k':
         case 'ArrowUp': {
           e.preventDefault();
-          const prev = visibleEmails[currentIdx - 1];
+          const prev = displayEmails[currentIdx - 1];
           if (prev) handleSelectEmail(prev.id);
           break;
         }
@@ -657,7 +665,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [visibleEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleReplyAll, handleForward, handleDeleteEmail, openCompose, selectEmail]);
+  }, [displayEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleReplyAll, handleForward, handleDeleteEmail, openCompose, selectEmail]);
 
   return (
     // onClick on root dismisses the context menu on any outside click
@@ -926,63 +934,66 @@ export default function App() {
                 <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 font-bold text-sm leading-none">×</button>
               </div>
             )}
-            <div className="flex-1 overflow-y-auto">
-              {visibleEmails.map(email => (
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto">
+              {displayEmails.length > 0 ? (
                 <div
-                  key={email.id}
-                  onClick={() => handleSelectEmail(email.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, type: 'email', emailTarget: email });
-                  }}
-                  className={cx(
-                    "p-4 border-b border-[var(--c-border-subtle)] cursor-pointer hover:bg-[var(--c-hover)] transition-colors relative",
-                    selectedEmailId === email.id ? "bg-[var(--c-selected)] hover:bg-[var(--c-selected)]" : ""
-                  )}
+                  style={{ height: emailListVirtualizer.getTotalSize(), position: 'relative' }}
                 >
-                  {selectedEmailId === email.id && (
-                    <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#004f96] rounded-r-md"></div>
-                  )}
-                  <div className="flex justify-between items-baseline mb-1">
-                    <div className="flex items-baseline gap-1 min-w-0 flex-1 pr-2">
-                      {email.starred && (
-                        <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
-                      )}
-                      {email.hasAttachments && (
-                        <Paperclip size={11} className="flex-shrink-0 text-[var(--c-text-muted)] mt-0.5" />
-                      )}
-                      <span className={cx(
-                        "truncate",
-                        !email.read ? "font-semibold text-[var(--c-text)]" : "font-normal text-[var(--c-text)]"
-                      )}>
-                        {email.subject || '(No Subject)'}
-                      </span>
-                    </div>
-                    <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0">
-                      {smartFormatTime(email.timestamp)}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-1 min-w-0">
-                    <span className={cx(
-                      "text-sm flex-shrink-0",
-                      !email.read ? "font-medium text-[#004f96]" : "text-[var(--c-text-mid)]"
-                    )}>
-                      {email.sender}
-                    </span>
-                    <span className="text-sm text-[var(--c-text-mid)] truncate opacity-75"> — {email.preview}</span>
-                  </div>
+                  {emailListVirtualizer.getVirtualItems().map(virtualRow => {
+                    const email = displayEmails[virtualRow.index];
+                    return (
+                      <div
+                        key={email.id}
+                        data-index={virtualRow.index}
+                        ref={emailListVirtualizer.measureElement}
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)` }}
+                        onClick={() => handleSelectEmail(email.id)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setCtxMenu({ x: e.clientX, y: e.clientY, type: 'email', emailTarget: email });
+                        }}
+                        className={cx(
+                          "p-4 border-b border-[var(--c-border-subtle)] cursor-pointer hover:bg-[var(--c-hover)] transition-colors relative",
+                          selectedEmailId === email.id ? "bg-[var(--c-selected)] hover:bg-[var(--c-selected)]" : ""
+                        )}
+                      >
+                        {selectedEmailId === email.id && (
+                          <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#004f96] rounded-r-md"></div>
+                        )}
+                        <div className="flex justify-between items-baseline mb-1">
+                          <div className="flex items-baseline gap-1 min-w-0 flex-1 pr-2">
+                            {email.starred && (
+                              <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
+                            )}
+                            {email.hasAttachments && (
+                              <Paperclip size={11} className="flex-shrink-0 text-[var(--c-text-muted)] mt-0.5" />
+                            )}
+                            <span className={cx(
+                              "truncate",
+                              !email.read ? "font-semibold text-[var(--c-text)]" : "font-normal text-[var(--c-text)]"
+                            )}>
+                              {email.subject || '(No Subject)'}
+                            </span>
+                          </div>
+                          <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0">
+                            {smartFormatTime(email.timestamp)}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1 min-w-0">
+                          <span className={cx(
+                            "text-sm flex-shrink-0",
+                            !email.read ? "font-medium text-[#004f96]" : "text-[var(--c-text-mid)]"
+                          )}>
+                            {email.sender}
+                          </span>
+                          <span className="text-sm text-[var(--c-text-mid)] truncate opacity-75"> — {email.preview}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-              {displayEmails.length > displayLimit && (
-                <button
-                  onClick={() => setDisplayLimit(n => n + 50)}
-                  className="w-full py-3 text-sm text-[var(--c-text-muted)] hover:text-[var(--c-text)] hover:bg-[var(--c-hover)] transition-colors"
-                >
-                  Load {Math.min(50, displayEmails.length - displayLimit)} more
-                </button>
-              )}
-              {displayEmails.length === 0 && (
+              ) : (
                 <div className="p-8 text-center text-[var(--c-text-muted)] text-sm mt-10">
                   {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder === ALL_INBOXES ? 'All Inboxes' : selectedFolder}`}
                 </div>
