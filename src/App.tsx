@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { downloadDir } from '@tauri-apps/api/path';
@@ -201,6 +201,15 @@ export default function App() {
     removeEmail,
     setSearchQuery,
   } = useMailStore();
+
+  // Restore saved panel layout from localStorage (or fall back to 30/70 split)
+  const panelLayout = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('mailmail-panels-v3');
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore corrupt data */ }
+    return undefined;
+  }, []);
 
   // Initialize plugins once on mount
   useEffect(() => {
@@ -887,9 +896,12 @@ export default function App() {
            <ComposeView />
         </div>
       ) : (
-        <PanelGroup direction="horizontal" autoSaveId="mailmail-panels-v2">
+        <PanelGroup direction="horizontal"
+          defaultLayout={panelLayout}
+          onLayoutChanged={(layout) => { try { localStorage.setItem('mailmail-panels-v3', JSON.stringify(layout)); } catch {} }}
+        >
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <Panel defaultSize={30} minSize={25} maxSize={55}>
+          <Panel id="list" defaultSize="30%" minSize="25%" maxSize="55%">
           <div className="h-full flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
             {/* Search bar only — folder name + refresh moved to sidebar */}
             <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
@@ -982,7 +994,7 @@ export default function App() {
           <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
           {/* RIGHT PANE: READING VIEW */}
-          <Panel defaultSize={70} minSize={40}>
+          <Panel id="reading" defaultSize="70%" minSize="40%">
           <div className="h-full flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
