@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
 import { X, Send, Save } from 'lucide-react';
 import { Slot } from './core/slot-registry';
+import { useI18n } from './i18n';
+import { useToast } from './components/Toast';
 
 const DRAFT_KEY = 'mailmail:draft';
 
@@ -15,6 +17,8 @@ interface DraftData {
 
 export default function ComposeView() {
   const { accounts, composeState, closeCompose } = useMailStore();
+  const { t } = useI18n();
+  const { toast } = useToast();
 
   // Restore draft only for fresh compose (not reply/forward which pre-fill recipients)
   const isReply = !!(composeState?.inReplyTo || (composeState?.to && composeState.to !== ''));
@@ -63,7 +67,7 @@ export default function ComposeView() {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAccount) {
-      setErrorMsg('No account selected');
+      setErrorMsg(t('compose.noAccount'));
       return;
     }
     setSending(true);
@@ -78,9 +82,12 @@ export default function ComposeView() {
       });
       // Clear draft on successful send
       localStorage.removeItem(DRAFT_KEY);
+      toast('success', t('compose.sendSuccess'));
       closeCompose();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(msg);
+      toast('error', t('compose.sendFailed', { error: msg }));
     } finally {
       setSending(false);
     }
@@ -88,11 +95,11 @@ export default function ComposeView() {
 
   // Derive title from compose context
   const composeTitle = (() => {
-    if (!composeState) return 'New Message';
+    if (!composeState) return t('compose.newMessage');
     const sub = composeState.subject ?? '';
-    if (sub.startsWith('Fwd:')) return 'Forward';
-    if (composeState.inReplyTo || sub.startsWith('Re:')) return 'Reply';
-    return 'New Message';
+    if (sub.startsWith('Fwd:')) return t('compose.forward');
+    if (composeState.inReplyTo || sub.startsWith('Re:')) return t('compose.reply');
+    return t('compose.newMessage');
   })();
 
   return (
@@ -103,7 +110,7 @@ export default function ComposeView() {
           {draftSaved && (
             <span className="flex items-center gap-1 text-xs text-[var(--c-text-muted)]">
               <Save size={11} />
-              Draft saved
+              {t('compose.draftSaved')}
             </span>
           )}
         </div>
@@ -114,7 +121,7 @@ export default function ComposeView() {
             className="flex items-center gap-2 bg-[#004f96] text-white px-4 py-1.5 rounded-md text-sm font-medium hover:bg-[#003b73] transition-colors disabled:opacity-50"
           >
             <Send size={14} />
-            {sending ? 'Sending...' : 'Send'}
+            {sending ? t('compose.sending') : t('compose.send')}
           </button>
           <button onClick={discardDraft} className="p-2 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors">
             <X size={18} />
@@ -130,7 +137,7 @@ export default function ComposeView() {
         <div className="space-y-3 max-w-3xl">
           {/* From selector: always shown so user can choose which account to send from */}
           <div className="flex items-center gap-3">
-            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">From</label>
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">{t('compose.from')}</label>
             <select
               value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
@@ -143,7 +150,7 @@ export default function ComposeView() {
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">To</label>
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">{t('compose.to')}</label>
             <input
               type="email"
               value={to}
@@ -155,13 +162,13 @@ export default function ComposeView() {
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">Subject</label>
+            <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">{t('compose.subject')}</label>
             <input
               type="text"
               value={subject}
               onChange={e => setSubject(e.target.value)}
               className="flex-1 p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
-              placeholder="Subject"
+              placeholder={t('compose.subject')}
             />
           </div>
 
@@ -170,7 +177,7 @@ export default function ComposeView() {
               value={body}
               onChange={e => setBody(e.target.value)}
               className="w-full min-h-[400px] p-3 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] resize-none leading-relaxed bg-[var(--c-panel)] text-[var(--c-text)]"
-              placeholder="Write your message..."
+              placeholder={t('compose.placeholder')}
             />
             {/* compose:footer slot — plugins (e.g. signature picker) render here */}
             <Slot id="compose:footer" body={body} setBody={setBody} />

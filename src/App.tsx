@@ -40,6 +40,8 @@ import { Slot } from './core/slot-registry';
 import { initBuiltinPlugins, destroyPlugins } from './plugin-registry';
 import { pluginManager } from './core/plugin-manager';
 import { eventBus } from './core/event-bus';
+import { useI18n } from './i18n';
+import { useToast } from './components/Toast';
 
 // Special virtual folder key that aggregates all accounts' inboxes.
 export const ALL_INBOXES = '__all__';
@@ -203,7 +205,17 @@ export default function App() {
     setSearchQuery,
   } = useMailStore();
 
-  // Restore saved panel layout from localStorage (or fall back to 30/70 split)
+  const { t } = useI18n();
+  const { toast } = useToast();
+
+  // Restore saved panel layouts from localStorage
+  const sidebarLayout = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('mailmail-sidebar-v1');
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore corrupt data */ }
+    return undefined;
+  }, []);
   const panelLayout = useMemo(() => {
     try {
       const raw = localStorage.getItem('mailmail-panels-v3');
@@ -275,7 +287,7 @@ export default function App() {
             const merged = freshEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
             setEmails([...memEmails.filter(e => e.folder !== 'inbox'), ...merged]);
           } else {
-            showSyncError('Sync failed — check your network or account credentials');
+            toast('error', t('mail.syncFailed'));
           }
           setSyncing(false);
         }
@@ -306,7 +318,7 @@ export default function App() {
         })
         .catch(err => {
           console.error('IDLE-triggered sync failed:', err);
-          showSyncError('Background sync failed');
+          toast('error', t('mail.bgSyncFailed'));
         })
         .finally(() => useMailStore.getState().setSyncing(false));
     }).then(fn => { unlistenMailNew = fn; }).catch(console.warn);
@@ -403,24 +415,17 @@ export default function App() {
         const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
         setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
       } else {
-        showSyncError('Sync failed — check your network or account credentials');
+        toast('error', t('mail.syncFailed'));
       }
     } catch (err) {
       console.error("Manual sync error:", err);
-      showSyncError('Sync error — see console for details');
+      toast('error', t('mail.syncError'));
     } finally {
       setSyncing(false);
     }
   };
 
-  // Sync error banner (auto-dismisses after 7 s)
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const syncErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showSyncError = useCallback((msg: string) => {
-    if (syncErrorTimerRef.current) clearTimeout(syncErrorTimerRef.current);
-    setSyncError(msg);
-    syncErrorTimerRef.current = setTimeout(() => setSyncError(null), 7000);
-  }, []);
+  // Sync error banner replaced by toast notifications
 
   const handleReply = useCallback((email: Email) => {
     const replyTo = email.senderEmail || email.sender;
@@ -475,11 +480,11 @@ export default function App() {
   }, [openCompose, accounts]);
 
   const handleDeleteEmail = useCallback(async (email: Email) => {
-    if (!window.confirm(`Delete "${email.subject}"?`)) return;
+    if (!window.confirm(t('mail.deleteConfirm', { subject: email.subject }))) return;
 
     const account = accounts.find(a => a.id === email.accountId);
     if (!account) {
-      showSyncError('Cannot delete: account not found');
+      toast('error', t('mail.accountNotFound'));
       return;
     }
     // Optimistically remove from UI so the interaction feels immediate.
@@ -491,13 +496,14 @@ export default function App() {
         uid: email.uid,
         emailId: email.id,
       });
+      toast('success', t('toast.emailDeleted'));
     } catch (err) {
       // Restore the email on failure so nothing is lost.
       useMailStore.getState().addEmails([email]);
-      showSyncError(`Delete failed: ${String(err)}`);
+      toast('error', t('mail.deleteFailed', { error: String(err) }));
       console.error('Failed to delete email:', err);
     }
-  }, [accounts, removeEmail, showSyncError]);
+  }, [accounts, removeEmail, t, toast]);
 
   // Persist read state to DB so it survives folder switches and app restarts.
   // selectEmail() only updates in-memory; this call syncs the DB.
@@ -668,12 +674,11 @@ export default function App() {
   }, [displayEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleReplyAll, handleForward, handleDeleteEmail, openCompose, selectEmail]);
 
   return (
-    // onClick on root dismisses the context menu on any outside click
     <div
       className={cx("flex h-screen w-screen bg-[var(--c-bg)] text-[var(--c-text)] font-sans overflow-hidden", theme === 'dark' && 'dark')}
       onClick={closeCtxMenu}
     >
-      {/* Context menu overlay */}
+      {/* Context menu overlay — rendered outside PanelGroup so it floats above everything */}
       {ctxMenu && (
         <div
           style={{ position: 'fixed', top: ctxMenu.y, left: ctxMenu.x, zIndex: 9999 }}
@@ -684,23 +689,23 @@ export default function App() {
             const e = ctxMenu.emailTarget!;
             return (
               <>
-                <CtxItem label={e.read ? 'Mark as Unread' : 'Mark as Read'} onClick={() => {
+                <CtxItem label={e.read ? t('mail.markUnread') : t('mail.markRead')} onClick={() => {
                   const nextRead = !e.read;
                   invoke('mark_email_read', { id: e.id, read: nextRead }).catch(console.error);
                   useMailStore.getState().markEmailRead(e.id, nextRead);
                   closeCtxMenu();
                 }} />
-                <CtxItem label={e.starred ? 'Unstar' : 'Star'} onClick={() => {
+                <CtxItem label={e.starred ? t('mail.unstar') : t('mail.star')} onClick={() => {
                   const nextStarred = !e.starred;
                   invoke('toggle_star', { id: e.id, starred: nextStarred }).catch(console.error);
                   useMailStore.getState().toggleStar(e.id, nextStarred);
                   closeCtxMenu();
                 }} />
-                <CtxItem label="Reply" onClick={() => { handleReply(e); closeCtxMenu(); }} />
-                <CtxItem label="Reply All" onClick={() => { handleReplyAll(e); closeCtxMenu(); }} />
-                <CtxItem label="Forward" onClick={() => { handleForward(e); closeCtxMenu(); }} />
+                <CtxItem label={t('mail.reply')} onClick={() => { handleReply(e); closeCtxMenu(); }} />
+                <CtxItem label={t('mail.replyAll')} onClick={() => { handleReplyAll(e); closeCtxMenu(); }} />
+                <CtxItem label={t('mail.forward')} onClick={() => { handleForward(e); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
-                <CtxItem label="Delete" danger onClick={() => { handleDeleteEmail(e); closeCtxMenu(); }} />
+                <CtxItem label={t('mail.delete')} danger onClick={() => { handleDeleteEmail(e); closeCtxMenu(); }} />
                 {pluginManager.getContextMenuItems('context-menu:email').length > 0 && (
                   <>
                     <div className="my-1 border-t border-[var(--c-border-subtle)]" />
@@ -721,10 +726,10 @@ export default function App() {
             const acc = ctxMenu.accountTarget!;
             return (
               <>
-                <CtxItem label="Refresh" onClick={() => { handleManualSync(); closeCtxMenu(); }} />
+                <CtxItem label={t('account.refresh')} onClick={() => { handleManualSync(); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
-                <CtxItem label="Remove Account" danger onClick={() => {
-                  if (window.confirm(`Remove account '${acc.name}'?`)) {
+                <CtxItem label={t('settings.removeAccount')} danger onClick={() => {
+                  if (window.confirm(t('account.removeConfirm', { name: acc.name }))) {
                     invoke('delete_account', { id: acc.id }).then(() => {
                       const s = useMailStore.getState();
                       s.setAccounts(s.accounts.filter(a => a.id !== acc.id));
@@ -752,11 +757,15 @@ export default function App() {
         </div>
       )}
 
+      <PanelGroup direction="horizontal">
       {/* LEFT PANE: SIDEBAR */}
-      <div
-        className="w-60 flex-shrink-0 flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
+      <Panel id="sidebar" defaultSize={sidebarLayout ?? "18%"} minSize="12%" maxSize="30%"
+        onResize={(size) => { try { localStorage.setItem('mailmail-sidebar-v1', JSON.stringify(size)); } catch {} }}
       >
-        <div>
+      <div
+        className="h-full flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
+      >
+        <div className="flex-1 overflow-y-auto">
           <Slot id="sidebar:top" />
           {/* Top action buttons: New Mail + Refresh */}
           <div className="flex items-center gap-2 p-3 pt-6">
@@ -765,24 +774,24 @@ export default function App() {
               className="flex-1 flex items-center justify-center gap-1.5 bg-[#004f96] text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-[#003b73] transition-colors"
             >
               <PenSquare size={14} />
-              New Mail
+              {t('sidebar.newMail')}
             </button>
             <button
               onClick={handleManualSync}
               disabled={syncing}
-              title="Refresh all"
+              title={t('account.refresh')}
               className="p-2 rounded-lg bg-[var(--c-bg)] border border-[var(--c-border)] text-[var(--c-text-muted)] hover:text-[var(--c-text)] transition-colors disabled:opacity-50"
             >
               {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             </button>
           </div>
           <div className="px-4 mt-2">
-            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Favorites</h2>
+            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">{t('sidebar.favorites')}</h2>
             <nav className="space-y-0.5">
               {accounts.length > 1 && (
                 <SidebarItem
                   icon={<Inbox size={16} />}
-                  label="All Inboxes"
+                  label={t('sidebar.allInboxes')}
                   active={selectedFolder === ALL_INBOXES && activeView === 'mail' && !filterAccountId}
                   onClick={() => { setFilterAccountId(null); setFolder(ALL_INBOXES); }}
                   count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
@@ -790,27 +799,27 @@ export default function App() {
               )}
               <SidebarItem
                 icon={<Inbox size={16} />}
-                label="Inbox"
+                label={t('sidebar.inbox')}
                 active={selectedFolder === 'inbox' && activeView === 'mail' && !filterAccountId}
                 onClick={() => { setFilterAccountId(null); setFolder('inbox'); }}
                 count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
               />
               <SidebarItem
                 icon={<Star size={16} />}
-                label="Starred"
+                label={t('sidebar.starred')}
                 active={selectedFolder === 'starred' && activeView === 'mail' && !filterAccountId}
                 onClick={() => { setFilterAccountId(null); setFolder('starred'); }}
                 count={emails.filter(e => e.starred).length}
               />
               <SidebarItem
                 icon={<Send size={16} />}
-                label="Sent"
+                label={t('sidebar.sent')}
                 active={selectedFolder === 'sent' && activeView === 'mail' && !filterAccountId}
                 onClick={() => { setFilterAccountId(null); setFolder('sent'); }}
               />
               <SidebarItem
                 icon={<Trash2 size={16} />}
-                label="Trash"
+                label={t('sidebar.trash')}
                 active={selectedFolder === 'trash' && activeView === 'mail' && !filterAccountId}
                 onClick={() => { setFilterAccountId(null); setFolder('trash'); }}
               />
@@ -818,7 +827,7 @@ export default function App() {
           </div>
 
           <div className="p-4">
-            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Accounts</h2>
+            <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">{t('sidebar.accounts')}</h2>
             <div className="flex-1 overflow-y-auto">
               {accounts.map(acc => {
                 const isExpanded = expandedAccountIds.has(acc.id);
@@ -856,20 +865,20 @@ export default function App() {
                       <div className="ml-6 mt-0.5 mb-1 space-y-0.5">
                         <SidebarSubItem
                           icon={<Inbox size={13} />}
-                          label="Inbox"
+                          label={t('sidebar.inbox')}
                           active={selectedFolder === 'inbox' && filterAccountId === acc.id && activeView === 'mail'}
                           count={accUnread}
                           onClick={() => { setFilterAccountId(acc.id); setFolder('inbox'); }}
                         />
                         <SidebarSubItem
                           icon={<Send size={13} />}
-                          label="Sent"
+                          label={t('sidebar.sent')}
                           active={selectedFolder === 'sent' && filterAccountId === acc.id && activeView === 'mail'}
                           onClick={() => { setFilterAccountId(acc.id); setFolder('sent'); }}
                         />
                         <SidebarSubItem
                           icon={<Trash2 size={13} />}
-                          label="Trash"
+                          label={t('sidebar.trash')}
                           active={selectedFolder === 'trash' && filterAccountId === acc.id && activeView === 'mail'}
                           onClick={() => { setFilterAccountId(acc.id); setFolder('trash'); }}
                         />
@@ -878,29 +887,36 @@ export default function App() {
                   </div>
                 );
               })}
-              <div className="mt-8 mb-4 border-t border-[var(--c-border)] pt-4"></div>
-              <SidebarItem
-                icon={<Settings size={16} />}
-                label="Settings"
-                active={activeView === 'settings'}
-                onClick={() => setView('settings')}
-              />
-              <Slot id="sidebar:bottom" />
             </div>
           </div>
         </div>
+        {/* Settings pinned at sidebar bottom */}
+        <div className="border-t border-[var(--c-border)] p-3">
+          <SidebarItem
+            icon={<Settings size={16} />}
+            label={t('sidebar.settings')}
+            active={activeView === 'settings'}
+            onClick={() => setView('settings')}
+          />
+          <Slot id="sidebar:bottom" />
+        </div>
       </div>
+      </Panel>
 
+      <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
+
+      {/* MAIN CONTENT AREA */}
+      <Panel id="main" defaultSize="82%">
       {activeView === 'settings' ? (
-        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
+        <div className="h-full bg-[var(--c-panel)] overflow-y-auto w-full">
            <SettingsView />
         </div>
       ) : activeView === 'add_account' ? (
-        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
+        <div className="h-full bg-[var(--c-panel)] overflow-y-auto w-full">
            <AddAccountView />
         </div>
       ) : activeView === 'compose' ? (
-        <div className="flex-1 bg-[var(--c-panel)] h-full overflow-y-auto w-full relative z-50">
+        <div className="h-full bg-[var(--c-panel)] overflow-y-auto w-full">
            <ComposeView />
         </div>
       ) : (
@@ -917,7 +933,7 @@ export default function App() {
                 <Search size={13} className="text-[var(--c-text-muted)] flex-shrink-0" />
                 <input
                   type="text"
-                  placeholder="Search"
+                  placeholder={t('mail.search')}
                   defaultValue={searchQuery}
                   onChange={(e) => handleSearchInput(e.target.value)}
                   className="bg-transparent text-sm flex-1 outline-none placeholder-[#a5a9b0]"
@@ -927,13 +943,6 @@ export default function App() {
                 )}
               </div>
             </div>
-            {/* Sync error banner — appears when all accounts fail */}
-            {syncError && (
-              <div className="mx-3 my-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between gap-3 text-xs text-red-700 flex-shrink-0">
-                <span className="flex-1">{syncError}</span>
-                <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 font-bold text-sm leading-none">×</button>
-              </div>
-            )}
             <div ref={listScrollRef} className="flex-1 overflow-y-auto">
               {displayEmails.length > 0 ? (
                 <div
@@ -973,29 +982,21 @@ export default function App() {
                               "truncate",
                               !email.read ? "font-semibold text-[var(--c-text)]" : "font-normal text-[var(--c-text)]"
                             )}>
-                              {email.subject || '(No Subject)'}
+                              {email.subject || t('mail.noSubject')}
                             </span>
                           </div>
                           <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0">
                             {smartFormatTime(email.timestamp)}
                           </span>
                         </div>
-                        <div className="flex items-baseline gap-1 min-w-0">
-                          <span className={cx(
-                            "text-sm flex-shrink-0",
-                            !email.read ? "font-medium text-[#004f96]" : "text-[var(--c-text-mid)]"
-                          )}>
-                            {email.sender}
-                          </span>
-                          <span className="text-sm text-[var(--c-text-mid)] truncate opacity-75"> — {email.preview}</span>
-                        </div>
+                        <div className="text-sm text-[var(--c-text-mid)] truncate opacity-75">{email.preview}</div>
                       </div>
                     );
                   })}
                 </div>
               ) : (
                 <div className="p-8 text-center text-[var(--c-text-muted)] text-sm mt-10">
-                  {syncing ? 'Syncing...' : searchQuery ? 'No results' : `No emails in ${selectedFolder === ALL_INBOXES ? 'All Inboxes' : selectedFolder}`}
+                  {syncing ? t('mail.syncing') : searchQuery ? t('mail.noResults') : t('mail.noEmails', { folder: selectedFolder === ALL_INBOXES ? t('sidebar.allInboxes') : selectedFolder })}
                 </div>
               )}
             </div>
@@ -1014,14 +1015,14 @@ export default function App() {
                     <button
                       onClick={() => handleReply(selectedEmail)}
                       className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)]"
-                      title="Reply (r)"
+                      title={`${t('mail.reply')} (r)`}
                     >
                       <Reply size={18} />
                     </button>
                     <button
                       onClick={() => handleReplyAll(selectedEmail)}
                       className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)] flex items-center gap-0.5"
-                      title="Reply All (a)"
+                      title={`${t('mail.replyAll')} (a)`}
                     >
                       <Reply size={18} />
                       <span className="text-[10px] font-semibold leading-none">All</span>
@@ -1029,14 +1030,14 @@ export default function App() {
                     <button
                       onClick={() => handleForward(selectedEmail)}
                       className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)]"
-                      title="Forward"
+                      title={t('mail.forward')}
                     >
                       <Forward size={18} />
                     </button>
                     <button
                       onClick={() => handleDeleteEmail(selectedEmail)}
                       className="p-2 hover:bg-[#fff0f0] rounded-md transition-colors text-[var(--c-text-mid)] hover:text-red-600"
-                      title="Delete"
+                      title={t('mail.delete')}
                     >
                       <Trash size={18} />
                     </button>
@@ -1050,9 +1051,14 @@ export default function App() {
                     <div className="h-10 w-10 bg-[var(--c-bg)] rounded-full flex items-center justify-center text-[var(--c-text-mid)] mr-4">
                       <CircleUserRound size={24} />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="font-semibold">{selectedEmail.sender}</div>
-                      <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'}</div>
+                      <div className="text-sm text-[var(--c-text-muted)] truncate">
+                        {selectedEmail.senderEmail && selectedEmail.senderEmail !== selectedEmail.sender
+                          ? `<${selectedEmail.senderEmail}>`
+                          : ''}
+                      </div>
+                      <div className="text-sm text-[var(--c-text-muted)]">{t('mail.to')} {selectedEmail.recipient || 'me'}</div>
                     </div>
                     <div className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0 self-start mt-1">
                       {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}
@@ -1108,7 +1114,7 @@ export default function App() {
               <div className="flex-1 flex items-center justify-center text-[var(--c-text-muted)]">
                 <div className="text-center">
                   <Mail size={48} className="mx-auto mb-4 opacity-20" />
-                  <p>Select an item to read</p>
+                  <p>{t('mail.selectItem')}</p>
                 </div>
               </div>
             )}
@@ -1116,6 +1122,8 @@ export default function App() {
           </Panel>
         </PanelGroup>
       )}
+      </Panel>
+      </PanelGroup>
     </div>
   );
 }
