@@ -798,9 +798,9 @@ export default function App() {
            <ComposeView />
         </div>
       ) : (
-        <PanelGroup direction="horizontal" autoSaveId="mailmail-panels">
+        <PanelGroup direction="horizontal" autoSaveId="mailmail-panels-v2">
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <Panel defaultSize={30} minSize={20} maxSize={50}>
+          <Panel defaultSize={30} minSize={25} maxSize={55}>
           <div className="h-full flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
             {/* Search bar only — folder name + refresh moved to sidebar */}
             <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
@@ -893,7 +893,7 @@ export default function App() {
           <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
           {/* RIGHT PANE: READING VIEW */}
-          <Panel defaultSize={70} minSize={30}>
+          <Panel defaultSize={70} minSize={40}>
           <div className="h-full flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
