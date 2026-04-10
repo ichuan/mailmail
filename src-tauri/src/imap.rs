@@ -6,6 +6,165 @@ use std::time::Duration;
 use async_imap::extensions::idle::IdleResponse;
 use tauri::Emitter;
 
+/// Decode RFC 2047 encoded words that mailparse::get_value() may leave undecoded
+/// (e.g. folded multi-line subjects, non-standard whitespace between encoded words).
+/// Handles Q-encoding and B-encoding; uses mailparse re-parse for non-UTF-8 charsets.
+fn decode_rfc2047(input: &str) -> String {
+    if !input.contains("=?") {
+        return input.to_string();
+    }
+    let mut result = String::new();
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        if i + 1 < len && bytes[i] == b'=' && bytes[i + 1] == b'?' {
+            let start = i;
+            i += 2;
+            let Some(cs_end) = bytes[i..].iter().position(|&b| b == b'?').map(|p| i + p) else {
+                result.push_str(&String::from_utf8_lossy(&bytes[start..]));
+                break;
+            };
+            let charset = &bytes[i..cs_end];
+            i = cs_end + 1;
+            if i >= len {
+                result.push_str(&String::from_utf8_lossy(&bytes[start..]));
+                break;
+            }
+            let enc = bytes[i].to_ascii_uppercase();
+            i += 1;
+            if i >= len || bytes[i] != b'?' {
+                result.push_str(&String::from_utf8_lossy(&bytes[start..]));
+                continue;
+            }
+            i += 1;
+            let payload_start = i;
+            let mut found_end = false;
+            while i + 1 < len {
+                if bytes[i] == b'?' && bytes[i + 1] == b'=' {
+                    found_end = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !found_end {
+                result.push_str(&String::from_utf8_lossy(&bytes[start..]));
+                break;
+            }
+            let payload = &bytes[payload_start..i];
+            i += 2;
+
+            let decoded_bytes = match enc {
+                b'Q' => decode_q_encoded(payload),
+                b'B' => decode_base64_bytes(payload),
+                _ => payload.to_vec(),
+            };
+            let cs_str = String::from_utf8_lossy(charset).to_lowercase();
+            if cs_str == "utf-8" || cs_str == "utf8" {
+                result.push_str(&String::from_utf8_lossy(&decoded_bytes));
+            } else if cs_str == "iso-8859-1" || cs_str == "latin1" {
+                result.extend(decoded_bytes.iter().map(|&b| b as char));
+            } else {
+                // For other charsets, re-parse through mailparse which has charset support
+                let fake = format!("X: =?{}?{}?{}?=\r\n",
+                    String::from_utf8_lossy(charset), enc as char, String::from_utf8_lossy(payload));
+                match mailparse::parse_header(fake.as_bytes()) {
+                    Ok((hdr, _)) => {
+                        let val = hdr.get_value();
+                        if val.contains("=?") {
+                            result.push_str(&String::from_utf8_lossy(&decoded_bytes));
+                        } else {
+                            result.push_str(&val);
+                        }
+                    }
+                    Err(_) => result.push_str(&String::from_utf8_lossy(&decoded_bytes)),
+                }
+            }
+
+            // RFC 2047 §6.2: drop whitespace between adjacent encoded words
+            let ws_start = i;
+            while i < len && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\r' || bytes[i] == b'\n') {
+                i += 1;
+            }
+            if i + 1 < len && bytes[i] == b'=' && bytes[i + 1] == b'?' {
+                continue; // next token is encoded word — drop whitespace
+            }
+            result.push_str(&String::from_utf8_lossy(&bytes[ws_start..i]));
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    result
+}
+
+fn decode_q_encoded(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        match data[i] {
+            b'_' => { out.push(b' '); i += 1; }
+            b'=' if i + 2 < data.len() => {
+                let hi = hex_nibble(data[i + 1]);
+                let lo = hex_nibble(data[i + 2]);
+                if let (Some(h), Some(l)) = (hi, lo) {
+                    out.push(h << 4 | l);
+                    i += 3;
+                } else {
+                    out.push(data[i]);
+                    i += 1;
+                }
+            }
+            b => { out.push(b); i += 1; }
+        }
+    }
+    out
+}
+
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn decode_base64_bytes(data: &[u8]) -> Vec<u8> {
+    const TABLE: [u8; 128] = {
+        let mut t = [0xFFu8; 128];
+        let mut c = 0u8;
+        while c < 26 { t[(b'A' + c) as usize] = c; c += 1; }
+        c = 0;
+        while c < 26 { t[(b'a' + c) as usize] = 26 + c; c += 1; }
+        c = 0;
+        while c < 10 { t[(b'0' + c) as usize] = 52 + c; c += 1; }
+        t[b'+' as usize] = 62;
+        t[b'/' as usize] = 63;
+        t
+    };
+    let filtered: Vec<u8> = data.iter().copied()
+        .filter(|&b| b != b'\r' && b != b'\n' && b != b' ' && b != b'\t')
+        .collect();
+    let mut out = Vec::with_capacity(filtered.len() * 3 / 4);
+    for chunk in filtered.chunks(4) {
+        let mut buf = [0u8; 4];
+        let mut valid = 0usize;
+        for (j, &b) in chunk.iter().enumerate() {
+            if b == b'=' { break; }
+            if (b as usize) < 128 && TABLE[b as usize] != 0xFF {
+                buf[j] = TABLE[b as usize];
+                valid = j + 1;
+            }
+        }
+        if valid >= 2 { out.push(buf[0] << 2 | buf[1] >> 4); }
+        if valid >= 3 { out.push(buf[1] << 4 | buf[2] >> 2); }
+        if valid >= 4 { out.push(buf[2] << 6 | buf[3]); }
+    }
+    out
+}
+
 fn extract_body_recursive<'a>(part: &mailparse::ParsedMail<'a>, body_text: &mut String, body_html: &mut String) {
     if part.subparts.is_empty() {
         let mimetype = part.ctype.mimetype.to_lowercase();
@@ -112,6 +271,14 @@ async fn select_folder(
     }
 }
 
+/// Verify credentials by opening and immediately closing an IMAP session.
+/// Used by the "Test Connection" button in AddAccountView before saving.
+pub async fn test_connection(account: &Account) -> Result<(), String> {
+    let mut session = connect_imap(account).await?;
+    let _ = session.logout().await;
+    Ok(())
+}
+
 /// Connect to IMAP and return an authenticated session
 async fn connect_imap(account: &Account) -> Result<async_imap::Session<tokio_native_tls::TlsStream<tokio::net::TcpStream>>, String> {
     let stream = tokio::net::TcpStream::connect((account.imap_server.as_str(), account.imap_port)).await
@@ -187,10 +354,10 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
 
         if let Ok(parsed) = parse_mail(body) {
             let subject = parsed.headers.iter().find(|h| h.get_key().eq_ignore_ascii_case("Subject"))
-                .map(|h| h.get_value()).unwrap_or_else(|| "(No Subject)".to_string());
+                .map(|h| decode_rfc2047(&h.get_value())).unwrap_or_else(|| "(No Subject)".to_string());
 
             let from = parsed.headers.iter().find(|h| h.get_key().eq_ignore_ascii_case("From"))
-                .map(|h| h.get_value()).unwrap_or_else(|| "Unknown".to_string());
+                .map(|h| decode_rfc2047(&h.get_value())).unwrap_or_else(|| "Unknown".to_string());
 
             let to_header = [
                 "To",
