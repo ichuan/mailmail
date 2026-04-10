@@ -279,12 +279,37 @@ export function deactivate(): void {
 | `src/plugins/theme-switcher/` | ✅ 已创建 | 明/暗主题切换内置插件 |
 | `src/plugins/image-toggle/` | ✅ 已创建 | 显示/隐藏图片内置插件 |
 | `src/plugins/signature/` | ✅ 已创建 | 签名 CRUD，`compose:footer` 槽位注入，设置页 UI |
-
-**Phase 5（规划中）**：插件 registry、一键安装/更新 UI、社区贡献指南。
+| `src/plugins/star/` | ✅ 已创建 | 星标切换插件，`toolbar:actions` 槽位，调用 `toggle_star` |
+| `src/plugins/notification/` | ✅ 已创建 | 桌面通知插件，Web Notification API，监听 `email:received` |
 
 ---
 
-## 五、文件清单
+## 五、下一批重要插件（推荐开发顺序）
+
+| 优先级 | 插件 ID | 难度 | 核心能力 | 涉及槽位 / 事件 |
+|--------|--------|------|---------|----------------|
+| ⭐⭐⭐ | `@mm/labels` | 中 | 用户自定义标签（彩色）；SQLite 存储；侧边栏标签过滤入口 | `sidebar:bottom`、`email-detail:header`、`context-menu:email` |
+| ⭐⭐⭐ | `@mm/keybindings` | 低 | 全局键盘快捷键表（j/k 导航、r 回复、d 删除等）；可配置；设置页 UI | `settings:sections`、EventBus commands |
+| ⭐⭐ | `@mm/undo-send` | 中 | 发送后延迟 5 s 可取消；倒计时 Toast；监听 `email:before-send` 拦截 | `compose:footer`，`email:before-send` |
+| ⭐⭐ | `@mm/markdown-compose` | 中 | ComposeView Markdown 编辑器（基于 CodeMirror）；预览切换；渲染后转 HTML 发送 | `compose:footer` |
+| ⭐ | `@mm/print` | 低 | 当前邮件打印专用 CSS + `window.print()` 触发；按钮注入工具栏 | `toolbar:actions` |
+| ⭐ | `@mm/templates` | 低 | 用户保存邮件模板；写信时一键填入；存 `plugin.storage` | `compose:footer` |
+
+### `@mm/labels` 设计要点
+
+- **数据层**：Rust 后端 `upsert_label(name, color)` + `assign_label(email_id, label_id)` 命令；存独立 `labels` 与 `email_labels` 表
+- **UI**：侧边栏添加标签列表（`sidebar:bottom` 槽）；邮件头显示彩色标签徽章（`email-detail:header` 槽）；右键菜单"添加标签"（未来 `context-menu:email` 槽）
+- **权限**：需声明 `email:read`、`email:modify-metadata`、`ui:slot`、`tauri:invoke`
+
+### `@mm/keybindings` 设计要点
+
+- **实现**：全局 `keydown` 监听器，不拦截输入框内按键（通过 `event.target` 判断）；快捷键表存 `plugin.storage`，设置页 UI 允许自定义
+- **默认快捷键表**：`j/k` 列表上下，`r` 回复，`a` Reply All，`f` Forward，`d` 删除，`n` 新建，`/` 搜索聚焦，`Esc` 关闭面板
+- **权限**：仅需 `ui:slot`、`settings:read-write`
+
+---
+
+## 六、文件清单
 
 | 文件 | 说明 |
 |------|------|
@@ -296,4 +321,6 @@ export function deactivate(): void {
 | `src/plugins/theme-switcher/` | 内置插件：主题切换 |
 | `src/plugins/image-toggle/` | 内置插件：图片显示开关 |
 | `src/plugins/signature/` | 内置插件：邮件签名 |
+| `src/plugins/star/` | 内置插件：星标切换 |
+| `src/plugins/notification/` | 内置插件：桌面通知 |
 
