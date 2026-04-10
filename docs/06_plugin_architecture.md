@@ -1,7 +1,7 @@
 # 插件架构设计
 
-> 最后更新：2026-04
-> 状态：Phase 1–4 已实施完成
+> 最后更新：2026-05
+> 状态：Phase 1–4 已全部实施完成（内置插件：theme-switcher、image-toggle、signature）
 
 ---
 
@@ -124,25 +124,16 @@
 核心 UI Shell 在关键位置预留 `<Slot id="xxx" />` 占位组件，插件向这些槽位注册 React 组件：
 
 ```
-sidebar:top              — 侧边栏顶部（按钮行旁）
-sidebar:folders-after    — 文件夹列表下方
-sidebar:bottom           — 侧边栏底部
-toolbar:left             — 阅读面板工具栏左侧
-toolbar:right            — 阅读面板工具栏右侧
-toolbar:compose          — 写信工具栏
-reading-pane:header      — 邮件头之后
-reading-pane:before-body — 正文之前
-reading-pane:after-body  — 正文之后
-reading-pane:footer      — 阅读面板底部
-list-item:badge          — 邮件列表项右侧徽章区
-list-item:actions        — 列表项悬停操作区
-settings:section         — 设置页新分区
-status-bar               — 底部状态栏
-context-menu:email       — 邮件右键菜单扩展项
-context-menu:account     — 账户右键菜单扩展项
-context-menu:folder      — 文件夹右键菜单扩展项
-modal                    — 全局模态框
+sidebar:top          — 侧边栏顶部（New Mail 按钮行旁）
+sidebar:bottom       — 侧边栏底部
+toolbar:actions      — 阅读面板工具栏（当前邮件 email prop 可用）
+email-detail:header  — 邮件头信息之后（email prop 可用）
+email-detail:footer  — 邮件正文之后（email prop 可用）
+settings:sections    — 设置页追加新分区
+compose:footer       — 写信面板底部（body/setBody prop 可用，签名插件使用）
 ```
+
+> **注意**：`list-item:badge`、`context-menu:*`、`status-bar` 等槽位已在设计文档预留但尚未在代码中放置 `<Slot>`，后续功能扩展时可按需添加。
 
 ### 插件 Manifest (manifest.json)
 
@@ -274,63 +265,35 @@ export function deactivate(): void {
 
 ---
 
-## 四、实施阶段
+## 四、实施状态（已完成）
 
-### Phase 1：核心基础设施 — EventBus + Slot + PluginManager
-
-| 步骤 | 文件 | 说明 |
+| 文件 | 状态 | 说明 |
 |------|------|------|
-| 1 | `src/core/event-bus.ts` | 类型安全的发布/订阅 |
-| 2 | `src/core/plugin-api.ts` | PluginAPI / PluginContext / Disposable 类型定义 |
-| 3 | `src/core/permissions.ts` | 权限枚举 + 检查逻辑 |
-| 4 | `src/core/slot-registry.ts` | SlotRegistry + `<Slot>` React 组件 |
-| 5 | `src/core/plugin-manager.ts` | 加载/卸载/启用/禁用/生命周期 |
-| 6 | `src/App.tsx` | 关键位置插入 `<Slot />`，state 变更 emit 事件 |
-| 7 | `src/store.ts` | action 触发 EventBus 事件 |
+| `src/core/event-bus.ts` | ✅ 已创建 | 类型安全的发布/订阅（17 种事件类型） |
+| `src/core/plugin-api.ts` | ✅ 已创建 | PluginAPI / PluginContext / Disposable 类型定义 |
+| `src/core/permissions.ts` | ✅ 已创建 | 权限枚举 + 运行时检查 |
+| `src/core/slot-registry.tsx` | ✅ 已创建 | SlotRegistry + `<Slot>` React 组件 |
+| `src/core/plugin-manager.ts` | ✅ 已创建 | 加载/卸载/启用/禁用/生命周期管理 |
+| `src/App.tsx` | ✅ 已集成 | 7 处 `<Slot />` 占位；state 变更 emit 事件 |
+| `src/store.ts` | ✅ 已集成 | action 触发 EventBus 事件 |
+| `src/plugins/theme-switcher/` | ✅ 已创建 | 明/暗主题切换内置插件 |
+| `src/plugins/image-toggle/` | ✅ 已创建 | 显示/隐藏图片内置插件 |
+| `src/plugins/signature/` | ✅ 已创建 | 签名 CRUD，`compose:footer` 槽位注入，设置页 UI |
 
-### Phase 2：第一个官方插件 — Theme Switcher
-
-将现有 theme 逻辑从 `store.ts` + `SettingsView.tsx` 提取到 `plugins/theme-switcher/`。端到端验证插件生命周期和 UI Slot 注册。
-
-### Phase 3：迁移更多内置功能为插件
-
-- 右键上下文菜单 → `plugins/context-menu/`
-- Show Images 开关 → `plugins/image-toggle/`
-
-### Phase 4：后端插件支持 (Rust trait)
-
-- 定义 `MailPlugin` trait（IMAP/SMTP 中间件管道）
-- 实现 Rust 侧插件管理（`plugin_host.rs`）
-- 前端 ↔ 后端插件的 IPC 桥接
-
-### Phase 5（未来）：生态 & 分发
-
-- 插件 registry（JSON index）
-- 一键安装/更新 UI
-- 社区贡献指南
+**Phase 5（规划中）**：插件 registry、一键安装/更新 UI、社区贡献指南。
 
 ---
 
-## 五、关键文件清单
+## 五、文件清单
 
-| 文件 | 操作 | 用途 |
-|------|------|------|
-| `src/core/event-bus.ts` | 新建 | 类型安全事件总线 |
-| `src/core/plugin-api.ts` | 新建 | API 类型 + Disposable |
-| `src/core/permissions.ts` | 新建 | 权限枚举 + 检查 |
-| `src/core/slot-registry.ts` | 新建 | `<Slot>` 组件 + 注册表 |
-| `src/core/plugin-manager.ts` | 新建 | 插件生命周期管理 |
-| `src/App.tsx` | 重构 | 插入 Slot、emit 事件 |
-| `src/store.ts` | 重构 | action 触发事件 |
-| `src-tauri/src/plugin_host.rs` | 新建 | Rust 侧 MailPlugin trait |
-| `plugins/theme-switcher/` | 新建 | 第一个示例插件 |
+| 文件 | 说明 |
+|------|------|
+| `src/core/event-bus.ts` | 类型安全事件总线 |
+| `src/core/plugin-api.ts` | API 类型 + Disposable |
+| `src/core/permissions.ts` | 权限枚举 + 检查 |
+| `src/core/slot-registry.tsx` | `<Slot>` 组件 + 注册表 |
+| `src/core/plugin-manager.ts` | 插件生命周期管理 |
+| `src/plugins/theme-switcher/` | 内置插件：主题切换 |
+| `src/plugins/image-toggle/` | 内置插件：图片显示开关 |
+| `src/plugins/signature/` | 内置插件：邮件签名 |
 
----
-
-## 六、待讨论
-
-1. **插件分发格式**：`.zip` 包（manifest + 编译 JS）vs npm 包 vs git clone？推荐 `.zip`。
-2. **插件间通信**：推荐仅通过 EventBus 间接通信，避免耦合。
-3. **WASM 插件何时引入**：Phase 5+，等社区有性能敏感需求时再考虑。
-4. **热重载**：前端插件天然支持 Vite HMR；后端插件需重启。
-5. **API 稳定性**：Phase 1-3 标记为 `experimental`，v1.0 后 stabilize。
