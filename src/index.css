@@ -73,3 +73,12 @@ html, body, #root {
 /* .hide-images CSS rule removed — image suppression now uses DOM-level
    <img> tag stripping in sanitizeEmailHtml() to prevent HTTP requests entirely.
    CSS display:none cannot prevent tracker pixels from firing. */
+
+/* Toast slide-in animation */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
