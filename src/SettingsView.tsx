@@ -206,7 +206,7 @@ export default function SettingsView() {
         </section>
 
         {/* About */}
-        <section className="border-t border-[var(--c-border)] pt-6 text-center">
+        <section className="border-t border-[var(--c-border)] pt-6 pb-8 text-center">
           <p className="text-sm font-semibold text-[var(--c-text-mid)]">MailMail</p>
           <p className="text-xs text-[var(--c-text-muted)] mt-1">Version 0.1.0</p>
           <p className="text-xs text-[var(--c-text-muted)] mt-0.5">&copy; {new Date().getFullYear()} MailMail. All rights reserved.</p>
