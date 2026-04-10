@@ -26,6 +26,7 @@ import {
   Star,
   Paperclip,
   Download,
+  ChevronRight,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -71,21 +72,27 @@ function smartFormatTime(timestamp: string): string {
   return format(date, 'yyyy/M/d');
 }
 
-async function syncAllAccounts(accounts: Account[], syncLimitDays: number, folder: string): Promise<Email[]> {
+async function syncAllAccounts(
+  accounts: Account[],
+  syncLimitDays: number,
+  folder: string,
+): Promise<{ emails: Email[]; allFailed: boolean }> {
   const results: Email[] = [];
+  let anySucceeded = false;
   for (const acc of accounts) {
     try {
-      const emails = await invoke<Email[]>('sync_folder', {
+      const fetched = await invoke<Email[]>('sync_folder', {
         account: acc,
         folder,
         limitDays: syncLimitDays,
       });
-      results.push(...emails);
+      results.push(...fetched);
+      anySucceeded = true;
     } catch (err) {
       console.error(`Failed to sync ${folder} for ${acc.email}:`, err);
     }
   }
-  return results;
+  return { emails: results, allFailed: accounts.length > 0 && !anySucceeded };
 }
 
 export default function App() {
@@ -168,11 +175,17 @@ export default function App() {
           // Step 2: sync from IMAP in background to refresh
           setSyncing(true);
           const limit = savedLimit ? Number(savedLimit) : syncLimitDays;
-          const freshEmails = await syncAllAccounts(loadedAccounts, limit, 'inbox');
-          // IMAP always returns read=false; preserve what the cache already marked as read
-          const { emails: memEmails } = useMailStore.getState();
-          const readIds = new Set(memEmails.filter(e => e.read).map(e => e.id));
-          setEmails(freshEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e));
+          const { emails: freshEmails, allFailed } = await syncAllAccounts(loadedAccounts, limit, 'inbox');
+          // Only update when at least one account synced successfully.
+          // If allFailed (e.g. keychain miss, network error), keep the cached emails.
+          if (!allFailed) {
+            const { emails: memEmails } = useMailStore.getState();
+            const readIds = new Set(memEmails.filter(e => e.read).map(e => e.id));
+            const merged = freshEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
+            setEmails([...memEmails.filter(e => e.folder !== 'inbox'), ...merged]);
+          } else {
+            showSyncError('Sync failed — check your network or account credentials');
+          }
           setSyncing(false);
         }
       } catch (err) {
@@ -193,13 +206,17 @@ export default function App() {
       const effectiveFolder = store.selectedFolder === ALL_INBOXES ? 'inbox' : store.selectedFolder;
       store.setSyncing(true);
       syncAllAccounts(store.accounts, store.syncLimitDays, effectiveFolder)
-        .then(newEmails => {
+        .then(({ emails: newEmails, allFailed }) => {
+          if (allFailed) return;
           const { emails: cur } = useMailStore.getState();
           const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
           const merged = newEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
           useMailStore.getState().setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
         })
-        .catch(err => console.error('IDLE-triggered sync failed:', err))
+        .catch(err => {
+          console.error('IDLE-triggered sync failed:', err);
+          showSyncError('Background sync failed');
+        })
         .finally(() => useMailStore.getState().setSyncing(false));
     }).then(fn => { unlistenMailNew = fn; }).catch(console.warn);
 
@@ -236,8 +253,8 @@ export default function App() {
       // Then refresh from IMAP
       setSyncing(true);
       try {
-        const folderEmails = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
-        if (!cancelled) {
+        const { emails: folderEmails, allFailed: syncFailed } = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
+        if (!cancelled && !syncFailed) {
           const { emails: cur } = useMailStore.getState();
           const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
           const existingIds = new Set(cur.map(e => e.id));
@@ -288,13 +305,18 @@ export default function App() {
     const effectiveFolder = selectedFolder === ALL_INBOXES ? 'inbox' : selectedFolder;
     setSyncing(true);
     try {
-      const folderEmails = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
-      const { emails: cur } = useMailStore.getState();
-      const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
-      const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
-      setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
+      const { emails: folderEmails, allFailed } = await syncAllAccounts(accounts, syncLimitDays, effectiveFolder);
+      if (!allFailed) {
+        const { emails: cur } = useMailStore.getState();
+        const readIds = new Set(cur.filter(e => e.read).map(e => e.id));
+        const merged = folderEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
+        setEmails([...cur.filter(e => e.folder !== effectiveFolder), ...merged]);
+      } else {
+        showSyncError('Sync failed — check your network or account credentials');
+      }
     } catch (err) {
       console.error("Manual sync error:", err);
+      showSyncError('Sync error — see console for details');
     } finally {
       setSyncing(false);
     }
@@ -320,6 +342,26 @@ export default function App() {
       subject: email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`,
       body: `\n\n--- Forwarded Message ---\nFrom: ${email.sender}\nDate: ${email.timestamp}\nSubject: ${email.subject}\n\n${email.bodyText || ''}`,
       fromAccountId: accounts.find(a => a.id === email.accountId)?.id,
+    });
+  };
+
+  const handleReplyAll = (email: Email) => {
+    const dateStr = format(new Date(email.timestamp), "EEE, MMM d, yyyy 'at' h:mm a");
+    const originalLines = (email.bodyText || '').split('\n');
+    const quoted = originalLines.map(l => `> ${l}`).join('\n');
+    // Collect all recipient addresses, deduplicate, exclude the sending account's own address.
+    const fromAccount = accounts.find(a => a.id === email.accountId);
+    const ownEmail = fromAccount?.email.toLowerCase() ?? '';
+    const replyTo = email.senderEmail || email.sender;
+    const toList = [replyTo, ...(email.recipient ? email.recipient.split(',').map(s => s.trim()) : [])]
+      .filter(addr => addr && addr.toLowerCase() !== ownEmail)
+      .filter((addr, i, arr) => arr.indexOf(addr) === i) // deduplicate
+      .join(', ');
+    openCompose({
+      to: toList,
+      subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
+      body: `\n\nOn ${dateStr}, ${email.sender} <${email.senderEmail}> wrote:\n${quoted}`,
+      fromAccountId: fromAccount?.id,
     });
   };
 
@@ -399,6 +441,28 @@ export default function App() {
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
+  // Per-account folder tree expansion in sidebar
+  const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
+  // When set, restricts the email list to a specific account (used by the per-account folder tree)
+  const [filterAccountId, setFilterAccountId] = useState<string | null>(null);
+
+  const toggleAccountExpand = useCallback((id: string) => {
+    setExpandedAccountIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  }, []);
+
+  // Sync error banner (auto-dismisses after 7 s)
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const syncErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showSyncError = useCallback((msg: string) => {
+    if (syncErrorTimerRef.current) clearTimeout(syncErrorTimerRef.current);
+    setSyncError(msg);
+    syncErrorTimerRef.current = setTimeout(() => setSyncError(null), 7000);
+  }, []);
+
   // Load more pagination
   const [displayLimit, setDisplayLimit] = useState(50);
 
@@ -410,6 +474,8 @@ export default function App() {
     } else {
       if (e.folder !== selectedFolder) return false;
     }
+    // When a specific account is selected in the sidebar tree, filter to that account only.
+    if (filterAccountId && e.accountId !== filterAccountId) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -450,6 +516,9 @@ export default function App() {
         }
         case 'r':
           if (selectedEmail) { e.preventDefault(); handleReply(selectedEmail); }
+          break;
+        case 'a':
+          if (selectedEmail) { e.preventDefault(); handleReplyAll(selectedEmail); }
           break;
         case 'f':
           if (selectedEmail) { e.preventDefault(); handleForward(selectedEmail); }
@@ -594,29 +663,29 @@ export default function App() {
                 <SidebarItem
                   icon={<Inbox size={16} />}
                   label="All Inboxes"
-                  active={selectedFolder === ALL_INBOXES && activeView === 'mail'}
-                  onClick={() => setFolder(ALL_INBOXES)}
+                  active={selectedFolder === ALL_INBOXES && activeView === 'mail' && !filterAccountId}
+                  onClick={() => { setFilterAccountId(null); setFolder(ALL_INBOXES); }}
                   count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
                 />
               )}
               <SidebarItem
                 icon={<Inbox size={16} />}
                 label="Inbox"
-                active={selectedFolder === 'inbox' && activeView === 'mail'}
-                onClick={() => setFolder('inbox')}
+                active={selectedFolder === 'inbox' && activeView === 'mail' && !filterAccountId}
+                onClick={() => { setFilterAccountId(null); setFolder('inbox'); }}
                 count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
               />
               <SidebarItem
                 icon={<Send size={16} />}
                 label="Sent"
-                active={selectedFolder === 'sent' && activeView === 'mail'}
-                onClick={() => setFolder('sent')}
+                active={selectedFolder === 'sent' && activeView === 'mail' && !filterAccountId}
+                onClick={() => { setFilterAccountId(null); setFolder('sent'); }}
               />
               <SidebarItem
                 icon={<Trash2 size={16} />}
                 label="Trash"
-                active={selectedFolder === 'trash' && activeView === 'mail'}
-                onClick={() => setFolder('trash')}
+                active={selectedFolder === 'trash' && activeView === 'mail' && !filterAccountId}
+                onClick={() => { setFilterAccountId(null); setFolder('trash'); }}
               />
             </nav>
           </div>
@@ -624,26 +693,64 @@ export default function App() {
           <div className="p-4">
             <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">Accounts</h2>
             <div className="flex-1 overflow-y-auto">
-              {accounts.map(acc => (
-                <button
-                  key={acc.id}
-                  style={{ width: 'calc(100% - 16px)' }}
-                  className="w-full flex items-center px-3 py-2 mx-2 rounded-md text-sm text-[var(--c-text-mid)] hover:bg-[var(--c-hover)] hover:text-[var(--c-text)] transition-colors text-left"
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, type: 'account', accountTarget: acc });
-                  }}
-                >
-                  <span className="mr-3 flex-shrink-0 opacity-80"><Mail size={16} /></span>
-                  <span className="truncate flex-1">{acc.email}</span>
-                  {emails.filter(em => em.accountId === acc.id && !em.read).length > 0 && (
-                    <span className="ml-2 text-xs bg-[#004f96] text-white px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
-                      {emails.filter(em => em.accountId === acc.id && !em.read).length}
-                    </span>
-                  )}
-                </button>
-              ))}
+              {accounts.map(acc => {
+                const isExpanded = expandedAccountIds.has(acc.id);
+                const accUnread = emails.filter(em => em.accountId === acc.id && em.folder === 'inbox' && !em.read).length;
+                return (
+                  <div key={acc.id}>
+                    <button
+                      style={{ width: 'calc(100% - 16px)' }}
+                      className={cx(
+                        "w-full flex items-center px-2 py-2 mx-2 rounded-md text-sm transition-colors text-left",
+                        filterAccountId === acc.id && activeView === 'mail'
+                          ? "bg-[var(--c-selected)] text-[var(--c-selected-text)] font-medium"
+                          : "text-[var(--c-text-mid)] hover:bg-[var(--c-hover)] hover:text-[var(--c-text)]"
+                      )}
+                      onClick={() => toggleAccountExpand(acc.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setCtxMenu({ x: e.clientX, y: e.clientY, type: 'account', accountTarget: acc });
+                      }}
+                    >
+                      <ChevronRight
+                        size={12}
+                        className={cx("mr-1 flex-shrink-0 transition-transform duration-150", isExpanded && "rotate-90")}
+                      />
+                      <span className="mr-2 flex-shrink-0 opacity-80"><Mail size={15} /></span>
+                      <span className="truncate flex-1 text-xs">{acc.email}</span>
+                      {accUnread > 0 && (
+                        <span className="ml-2 text-xs bg-[#004f96] text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                          {accUnread}
+                        </span>
+                      )}
+                    </button>
+                    {isExpanded && (
+                      <div className="ml-6 mt-0.5 mb-1 space-y-0.5">
+                        <SidebarSubItem
+                          icon={<Inbox size={13} />}
+                          label="Inbox"
+                          active={selectedFolder === 'inbox' && filterAccountId === acc.id && activeView === 'mail'}
+                          count={accUnread}
+                          onClick={() => { setFilterAccountId(acc.id); setFolder('inbox'); }}
+                        />
+                        <SidebarSubItem
+                          icon={<Send size={13} />}
+                          label="Sent"
+                          active={selectedFolder === 'sent' && filterAccountId === acc.id && activeView === 'mail'}
+                          onClick={() => { setFilterAccountId(acc.id); setFolder('sent'); }}
+                        />
+                        <SidebarSubItem
+                          icon={<Trash2 size={13} />}
+                          label="Trash"
+                          active={selectedFolder === 'trash' && filterAccountId === acc.id && activeView === 'mail'}
+                          onClick={() => { setFilterAccountId(acc.id); setFolder('trash'); }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div className="mt-8 mb-4 border-t border-[var(--c-border)] pt-4"></div>
               <SidebarItem
                 icon={<Settings size={16} />}
@@ -689,6 +796,13 @@ export default function App() {
                 )}
               </div>
             </div>
+            {/* Sync error banner — appears when all accounts fail */}
+            {syncError && (
+              <div className="mx-3 my-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between gap-3 text-xs text-red-700 flex-shrink-0">
+                <span className="flex-1">{syncError}</span>
+                <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 font-bold text-sm leading-none">×</button>
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto">
               {visibleEmails.map(email => (
                 <div
@@ -755,9 +869,17 @@ export default function App() {
                     <button
                       onClick={() => handleReply(selectedEmail)}
                       className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)]"
-                      title="Reply"
+                      title="Reply (r)"
                     >
                       <Reply size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleReplyAll(selectedEmail)}
+                      className="p-2 hover:bg-[var(--c-hover)] rounded-md transition-colors text-[var(--c-text-mid)] flex items-center gap-0.5"
+                      title="Reply All (a)"
+                    >
+                      <Reply size={18} />
+                      <span className="text-[10px] font-semibold leading-none">All</span>
                     </button>
                     <button
                       onClick={() => handleForward(selectedEmail)}
@@ -878,6 +1000,32 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function SidebarSubItem({ icon, label, active, onClick, count }: {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  count?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cx(
+        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors text-left",
+        active
+          ? "bg-[var(--c-selected)] text-[var(--c-selected-text)] font-medium"
+          : "text-[var(--c-text-mid)] hover:bg-[var(--c-hover)] hover:text-[var(--c-text)]"
+      )}
+    >
+      <span className={cx("flex-shrink-0", active ? "text-[#004f96]" : "opacity-70")}>{icon}</span>
+      <span className="truncate flex-1">{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className="text-xs bg-[#004f96] text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{count}</span>
+      )}
+    </button>
+  );
 }
 
 function SidebarItem({ icon, label, active, onClick, count }: { icon: React.ReactNode; label: string; active: boolean; onClick?: () => void; count?: number }) {

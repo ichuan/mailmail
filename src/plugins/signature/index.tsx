@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from '../../store';
 import type { Signature } from '../../store';
-import type { Plugin, PluginContext } from '../../core/plugin-api';
+import type { PluginModule, PluginAPI } from '../../core/plugin-api';
 
 // ── Compose: signature picker ────────────────────────────────────────────────
 
@@ -70,16 +70,16 @@ function SignatureSettings() {
   const [isDefault, setIsDefault] = useState(false);
   const [savingError, setSavingError] = useState('');
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
       const sigs = await invoke<Signature[]>('get_signatures');
       setSignatures(sigs);
     } catch (e) {
       console.error('Failed to load signatures:', e);
     }
-  };
+  }, [setSignatures]);
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(); }, [reload]);
 
   const startEdit = (sig?: Signature) => {
     if (sig) {
@@ -131,12 +131,7 @@ function SignatureSettings() {
   return (
     <section>
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-semibold">Signatures</h3>
-          <p className="text-sm text-[var(--c-text-muted)] mt-1">
-            Create signature templates to automatically append to outgoing emails.
-          </p>
-        </div>
+        <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase">Signatures</h3>
         <button
           onClick={() => startEdit()}
           className="flex items-center gap-1.5 text-sm bg-[#004f96] text-white px-3 py-1.5 rounded-md hover:bg-[#003b73] transition-colors"
@@ -252,10 +247,10 @@ function stripSignatureBlock(body: string): string {
 
 // ── Plugin registration ───────────────────────────────────────────────────────
 
-const signaturePlugin: Plugin = {
-  activate(ctx: PluginContext) {
-    ctx.ui.registerSlot('compose:footer', SignaturePicker);
-    ctx.ui.registerSlot('settings:sections', SignatureSettings);
+const signaturePlugin: PluginModule = {
+  activate(api: PluginAPI) {
+    api.ui.registerSlot('compose:footer', SignaturePicker);
+    api.ui.registerSlot('settings:sections', SignatureSettings);
   },
   deactivate() {
     // SlotRegistry cleanup is handled by PluginManager via removeByPlugin.
