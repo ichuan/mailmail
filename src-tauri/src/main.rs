@@ -338,6 +338,87 @@ async fn delete_signature(state: State<'_, Arc<AppState>>, id: String) -> Result
     get_db(&guard)?.delete_signature(&id).await
 }
 
+/// Escape HTML special characters to prevent injection in the print template.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
+}
+
+/// Open a native print dialog for an email.
+/// Rust builds the complete print-ready HTML document (including @media print CSS),
+/// writes it to a temp file, and opens a dedicated WebView window.
+/// The window auto-triggers window.print() on load, plus shows a manual Print button.
+#[tauri::command]
+async fn print_email(
+    app: AppHandle,
+    subject: String,
+    sender: String,
+    sender_email: String,
+    recipient: String,
+    date: String,
+    body_html: String,
+) -> Result<(), String> {
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Print — {subject}</title>
+<style>
+@media print {{ @page {{ margin: 1.5cm; }} }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #1a1a1a; }}
+.print-header {{ border-bottom: 2px solid #004f96; padding-bottom: 12px; margin-bottom: 16px; }}
+.print-header h1 {{ font-size: 18px; margin: 0 0 8px; color: #004f96; }}
+.print-header .meta {{ font-size: 13px; color: #666; line-height: 1.6; }}
+.print-body {{ font-size: 14px; line-height: 1.6; }}
+.print-body img {{ max-width: 100%; }}
+@media screen {{ .print-actions {{ text-align: center; margin-top: 24px; border-top: 1px solid #ddd; padding-top: 12px; }} .print-actions button {{ padding: 8px 24px; font-size: 14px; cursor: pointer; border: 1px solid #004f96; background: #004f96; color: white; border-radius: 4px; }} .print-actions button:hover {{ background: #003a75; }} }}
+@media print {{ .print-actions {{ display: none; }} }}
+</style></head><body>
+<div class="print-header">
+  <h1>{subject}</h1>
+  <div class="meta">
+    <div><strong>From:</strong> {sender} &lt;{sender_email}&gt;</div>
+    <div><strong>To:</strong> {recipient}</div>
+    <div><strong>Date:</strong> {date}</div>
+  </div>
+</div>
+<div class="print-body">{body_html}</div>
+<div class="print-actions"><button onclick="window.print()">Print</button></div>
+<script>window.onload = function() {{ setTimeout(function() {{ window.print(); }}, 300); }};</script>
+</body></html>"#,
+        subject = html_escape(&subject),
+        sender = html_escape(&sender),
+        sender_email = html_escape(&sender_email),
+        recipient = html_escape(&recipient),
+        date = html_escape(&date),
+        body_html = body_html, // already sanitized by ammonia
+    );
+
+    let temp = std::env::temp_dir().join("mailmail_print.html");
+    std::fs::write(&temp, &html).map_err(|e| e.to_string())?;
+
+    let file_url = url::Url::from_file_path(&temp)
+        .map_err(|_| "Failed to create file URL".to_string())?;
+
+    // Close any existing print window before opening a new one
+    if let Some(w) = app.get_webview_window("print") {
+        let _ = w.close();
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "print",
+        tauri::WebviewUrl::External(file_url),
+    )
+    .title(format!("Print — {}", subject))
+    .inner_size(800.0, 600.0)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 fn main() {
     let mut host = PluginHost::new();
     host.register(Box::new(TrackingPixelStripper));
@@ -373,6 +454,7 @@ fn main() {
             get_cached_emails,
             delete_email,
             search_emails,
+            print_email,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
