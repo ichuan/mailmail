@@ -35,6 +35,42 @@ fn strip_css_url_refs(style: &str) -> String {
     out
 }
 
+/// Parse an RFC 5322 From header value into (display_name, email_address).
+///
+/// Handles the most common formats:
+///   "John Doe <john@example.com>"  → ("John Doe",    "john@example.com")
+///   '"John Doe" <john@example.com>'→ ("John Doe",    "john@example.com")
+///   "<john@example.com>"           → ("john@example.com", "john@example.com")
+///   "john@example.com"             → ("john@example.com", "john@example.com")
+///
+/// Multiple addresses (e.g. Reply-To lists) use only the first address.
+fn parse_from_header(from: &str) -> (String, String) {
+    // Take only the first address from a comma-separated list.
+    let first = from.split(',').next().unwrap_or(from).trim();
+
+    if let Some(start) = first.find('<') {
+        if let Some(end) = first.rfind('>') {
+            let email = first[start + 1..end].trim().to_string();
+            let raw_name = first[..start].trim();
+            // Strip surrounding double or single quotes from the display name.
+            let display_name = if raw_name.len() >= 2
+                && ((raw_name.starts_with('"') && raw_name.ends_with('"'))
+                    || (raw_name.starts_with('\'') && raw_name.ends_with('\'')))
+            {
+                raw_name[1..raw_name.len() - 1].trim().to_string()
+            } else {
+                raw_name.to_string()
+            };
+            let display = if display_name.is_empty() { email.clone() } else { display_name };
+            return (display, email);
+        }
+    }
+
+    // No angle brackets — the whole string is treated as the email address.
+    let addr = first.to_string();
+    (addr.clone(), addr)
+}
+
 /// Decode RFC 2047 encoded words that mailparse::get_value() may leave undecoded
 /// (e.g. folded multi-line subjects, non-standard whitespace between encoded words).
 /// Handles Q-encoding and B-encoding; uses mailparse re-parse for non-UTF-8 charsets.
@@ -445,7 +481,10 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
             let preview = body_text.chars().take(100).collect::<String>();
 
             let uid = msg.uid.unwrap_or(0);
-            emails.push(Email {
+                // Split the raw From header into display name and email address.
+                // Before this change both fields contained the full "Name <addr>" string.
+                let (sender_display, sender_addr) = parse_from_header(&from);
+                emails.push(Email {
                 // Deterministic ID prevents the same email getting a new ID
                 // on every background sync, which would orphan selectedEmailId
                 // and wipe the readIds Set in the frontend.
@@ -453,8 +492,8 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
                 account_id: account.id.clone(),
                 folder: folder.to_lowercase(),
                 uid,
-                sender: from.clone(),
-                sender_email: from,
+                sender: sender_display,
+                sender_email: sender_addr,
                 recipient: to_header,
                 subject,
                 preview,
@@ -619,7 +658,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_css_url_refs;
+    use super::{strip_css_url_refs, parse_from_header};
 
     #[test]
     fn test_strip_css_url_unquoted() {
@@ -665,6 +704,48 @@ mod tests {
         let result = strip_css_url_refs(input);
         assert!(!result.contains("url("));
         assert!(result.contains("color: blue"));
+    }
+
+    #[test]
+    fn test_parse_from_name_and_email() {
+        let (name, email) = parse_from_header("John Doe <john@example.com>");
+        assert_eq!(name, "John Doe");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_quoted_name() {
+        let (name, email) = parse_from_header("\"John Doe\" <john@example.com>");
+        assert_eq!(name, "John Doe");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_angle_only() {
+        let (name, email) = parse_from_header("<john@example.com>");
+        assert_eq!(name, "john@example.com");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_bare_email() {
+        let (name, email) = parse_from_header("john@example.com");
+        assert_eq!(name, "john@example.com");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_multiple_takes_first() {
+        let (name, email) = parse_from_header("Alice <a@example.com>, Bob <b@example.com>");
+        assert_eq!(name, "Alice");
+        assert_eq!(email, "a@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_whitespace_trimmed() {
+        let (name, email) = parse_from_header("  Jane  <  jane@example.com  >  ");
+        assert_eq!(name, "Jane");
+        assert_eq!(email, "jane@example.com");
     }
 }
 
