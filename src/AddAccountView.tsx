@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
-import { X, Lock, PlusCircle } from 'lucide-react';
+import type { Email } from './store';
+import { X, Lock, PlusCircle, CheckCircle } from 'lucide-react';
 
 export default function AddAccountView() {
-  const { setView, accounts, setAccounts, setEmails } = useMailStore();
+  const { setView, accounts, setAccounts, mergeEmails } = useMailStore();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [imapServer, setImapServer] = useState('');
@@ -14,34 +15,52 @@ export default function AddAccountView() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testOk, setTestOk] = useState<boolean | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const buildAccount = () => ({
+    id: crypto.randomUUID(),
+    name,
+    email,
+    imapServer,
+    imapPort,
+    smtpServer,
+    smtpPort,
+    username,
+    password,
+  });
+
+  const handleTest = async () => {
+    setTesting(true);
+    setErrorMsg('');
+    setTestOk(null);
+    try {
+      await invoke('test_connection', { account: buildAccount() });
+      setTestOk(true);
+    } catch (err: any) {
+      setTestOk(false);
+      setErrorMsg(err.toString());
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
     try {
-      const newAccount = {
-        id: crypto.randomUUID(),
-        name,
-        email,
-        imapServer,
-        imapPort,
-        smtpServer,
-        smtpPort,
-        username,
-        password
-      };
+      const newAccount = buildAccount();
 
       await invoke('add_account', { account: newAccount });
 
       // Update accounts in store
       setAccounts([...accounts, newAccount]);
 
-      // Fetch initial emails immediately
-      const syncedEmails = await invoke<any[]>('sync_inbox', { account: newAccount });
-      // Need to import useMailStore setEmails logic. Actually I destructured setAccounts, I should also destructure setEmails
-      setEmails(syncedEmails);
+      // Fetch initial emails and merge with existing emails from other accounts
+      const syncedEmails = await invoke<Email[]>('sync_inbox', { account: newAccount, limitDays: 30 });
+      mergeEmails(syncedEmails);
 
       // Go back to inbox
       setView('mail');
@@ -53,22 +72,22 @@ export default function AddAccountView() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col pt-8 px-12 text-[#1a1c1c]">
+    <div className="w-full h-full flex flex-col pt-8 px-12 text-[var(--c-text)]">
       <div className="flex justify-between items-center mb-10 w-full max-w-4xl mx-auto">
         <div>
           <h2 className="text-3xl font-bold tracking-tight mb-2">Add Account</h2>
-          <p className="text-[#717783] text-sm">Connect a new IMAP/SMTP mail account to your workspace.</p>
+          <p className="text-[var(--c-text-muted)] text-sm">Connect a new IMAP/SMTP mail account to your workspace.</p>
         </div>
-        <button onClick={() => setView('mail')} className="p-2 hover:bg-[#f3f3f3] rounded-full text-[#717783] transition-colors"><X size={20} /></button>
+        <button onClick={() => setView('mail')} className="p-2 hover:bg-[var(--c-hover)] rounded-full text-[var(--c-text-muted)] transition-colors"><X size={20} /></button>
       </div>
 
       <div className="flex-1 w-full max-w-4xl mx-auto">
-        <div className="bg-[#fcfcfc] border border-[#f1f1f1] rounded-xl overflow-hidden shadow-sm flex flex-col md:flex-row">
-          <div className="w-full md:w-5/12 bg-[#f3f3f3]/50 p-10 flex flex-col justify-between items-start border-r border-[#f1f1f1]">
+        <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl overflow-hidden shadow-sm flex flex-col md:flex-row">
+          <div className="w-full md:w-5/12 bg-[var(--c-bg)] p-10 flex flex-col justify-between items-start border-r border-[var(--c-border)]">
             <div>
               <PlusCircle className="text-[#004f96] mb-4" size={32} />
-              <h2 className="text-2xl font-bold tracking-tight text-[#1a1c1c] leading-tight mb-4">Connect your world.</h2>
-              <p className="text-sm text-[#717783] leading-relaxed">
+              <h2 className="text-2xl font-bold tracking-tight text-[var(--c-text)] leading-tight mb-4">Connect your world.</h2>
+              <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">
                   Essentialist Mail centralizes your communication into a single, serene environment. Choose your provider to begin.
               </p>
             </div>
@@ -76,7 +95,7 @@ export default function AddAccountView() {
 
           <div className="w-full md:w-7/12 p-8 overflow-y-auto">
             <form onSubmit={handleSubmit} className="space-y-4">
-              <h3 className="uppercase tracking-widest text-[#717783] font-bold mb-4 text-xs">Configuration</h3>
+              <h3 className="uppercase tracking-widest text-[var(--c-text-muted)] font-bold mb-4 text-xs">Configuration</h3>
               {errorMsg && <div className="p-3 bg-red-100/50 text-red-800 rounded-md text-sm border border-red-200">{errorMsg}</div>}
 
               <div className="grid grid-cols-2 gap-4">
@@ -122,8 +141,16 @@ export default function AddAccountView() {
                 <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none focus:border-[#004f96]" placeholder="••••••••••••" />
               </div>
 
-              <button disabled={loading} type="submit" className="w-full mt-6 bg-[#004f96] text-white p-3 rounded-md font-medium text-sm hover:bg-[#003b73] transition-colors disabled:opacity-50">
+              <button disabled={loading} type="submit" className="w-full mt-2 bg-[#004f96] text-white p-3 rounded-md font-medium text-sm hover:bg-[#003b73] transition-colors disabled:opacity-50">
                 {loading ? 'Adding Account...' : 'Connect Account'}
+              </button>
+              <button
+                type="button"
+                disabled={testing || !imapServer || !username || !password}
+                onClick={handleTest}
+                className="w-full mt-2 border border-[#004f96] text-[#004f96] p-2.5 rounded-md font-medium text-sm hover:bg-[#004f96]/5 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {testing ? 'Testing…' : testOk === true ? <><CheckCircle size={14} className="text-green-600" /> Connection OK</> : 'Test IMAP Connection'}
               </button>
 
             </form>

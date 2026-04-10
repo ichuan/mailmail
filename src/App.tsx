@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 import SettingsView from './SettingsView';
 import AddAccountView from './AddAccountView';
@@ -375,6 +376,8 @@ export default function App() {
   }, [openCompose, accounts]);
 
   const handleDeleteEmail = useCallback(async (email: Email) => {
+    if (!window.confirm(`Delete "${email.subject}"?`)) return;
+
     const account = accounts.find(a => a.id === email.accountId);
     if (!account) {
       showSyncError('Cannot delete: account not found');
@@ -475,9 +478,12 @@ export default function App() {
 
   const displayEmails = emails.filter(e => {
     // For the unified inbox, show all inbox-folder emails regardless of account.
+    // For starred, show all starred emails across folders.
     // For a normal folder, restrict to the exact selectedFolder value.
     if (selectedFolder === ALL_INBOXES) {
       if (e.folder !== 'inbox') return false;
+    } else if (selectedFolder === 'starred') {
+      if (!e.starred) return false;
     } else {
       if (e.folder !== selectedFolder) return false;
     }
@@ -490,7 +496,7 @@ export default function App() {
       e.sender.toLowerCase().includes(q) ||
       (e.bodyText ?? '').toLowerCase().includes(q)
     );
-  });
+  }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   // Reset pagination when folder or search changes
   useEffect(() => { setDisplayLimit(50); }, [selectedFolder, searchQuery]);
   const visibleEmails = displayEmails.slice(0, displayLimit);
@@ -684,6 +690,13 @@ export default function App() {
                 count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
               />
               <SidebarItem
+                icon={<Star size={16} />}
+                label="Starred"
+                active={selectedFolder === 'starred' && activeView === 'mail' && !filterAccountId}
+                onClick={() => { setFilterAccountId(null); setFolder('starred'); }}
+                count={emails.filter(e => e.starred).length}
+              />
+              <SidebarItem
                 icon={<Send size={16} />}
                 label="Sent"
                 active={selectedFolder === 'sent' && activeView === 'mail' && !filterAccountId}
@@ -785,9 +798,10 @@ export default function App() {
            <ComposeView />
         </div>
       ) : (
-        <>
+        <PanelGroup direction="horizontal" autoSaveId="mailmail-panels">
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <div className="w-[320px] flex-shrink-0 flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
+          <Panel defaultSize={30} minSize={20} maxSize={50}>
+          <div className="h-full flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
             {/* Search bar only — folder name + refresh moved to sidebar */}
             <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
               <div className="flex items-center gap-2 bg-[var(--c-bg)] rounded-lg px-3 py-1.5">
@@ -830,26 +844,33 @@ export default function App() {
                     <div className="absolute left-0 top-3 bottom-3 w-1 bg-[#004f96] rounded-r-md"></div>
                   )}
                   <div className="flex justify-between items-baseline mb-1">
-                    <span className={cx(
-                      "truncate pr-2",
-                      !email.read ? "font-semibold text-[#004f96]" : "font-normal text-[var(--c-text)]"
-                    )}>
-                      {email.sender}
-                    </span>
+                    <div className="flex items-baseline gap-1 min-w-0 flex-1 pr-2">
+                      {email.starred && (
+                        <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
+                      )}
+                      {email.hasAttachments && (
+                        <Paperclip size={11} className="flex-shrink-0 text-[var(--c-text-muted)] mt-0.5" />
+                      )}
+                      <span className={cx(
+                        "truncate",
+                        !email.read ? "font-semibold text-[var(--c-text)]" : "font-normal text-[var(--c-text)]"
+                      )}>
+                        {email.subject || '(No Subject)'}
+                      </span>
+                    </div>
                     <span className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0">
                       {smartFormatTime(email.timestamp)}
                     </span>
                   </div>
-                  <div className="flex items-baseline gap-1">
-                    {email.starred && (
-                      <Star size={11} className="flex-shrink-0 text-yellow-400 fill-yellow-400 mt-0.5" />
-                    )}
-                    {email.hasAttachments && (
-                      <Paperclip size={11} className="flex-shrink-0 text-[var(--c-text-muted)] mt-0.5" />
-                    )}
-                    <div className={cx("text-sm mb-1 truncate", !email.read ? "font-medium" : "font-normal")}>{email.subject}</div>
+                  <div className="flex items-baseline gap-1 min-w-0">
+                    <span className={cx(
+                      "text-sm flex-shrink-0",
+                      !email.read ? "font-medium text-[#004f96]" : "text-[var(--c-text-mid)]"
+                    )}>
+                      {email.sender}
+                    </span>
+                    <span className="text-sm text-[var(--c-text-mid)] truncate opacity-75"> — {email.preview}</span>
                   </div>
-                  <div className="text-sm text-[var(--c-text-mid)] truncate opacity-90">{email.preview}</div>
                 </div>
               ))}
               {displayEmails.length > displayLimit && (
@@ -867,9 +888,13 @@ export default function App() {
               )}
             </div>
           </div>
+          </Panel>
+
+          <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
           {/* RIGHT PANE: READING VIEW */}
-          <div className="flex-1 flex flex-col bg-[var(--c-panel)]">
+          <Panel defaultSize={70} minSize={30}>
+          <div className="h-full flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
                 <div className="h-14 border-b border-[var(--c-border)] flex items-center px-6 justify-between flex-shrink-0">
@@ -913,9 +938,12 @@ export default function App() {
                     <div className="h-10 w-10 bg-[var(--c-bg)] rounded-full flex items-center justify-center text-[var(--c-text-mid)] mr-4">
                       <CircleUserRound size={24} />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <div className="font-semibold">{selectedEmail.sender}</div>
-                      <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'} • {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}</div>
+                      <div className="text-sm text-[var(--c-text-muted)]">to {selectedEmail.recipient || 'me'}</div>
+                    </div>
+                    <div className="text-xs text-[var(--c-text-muted)] whitespace-nowrap flex-shrink-0 self-start mt-1">
+                      {format(new Date(selectedEmail.timestamp), 'MMM d, yyyy, h:mm a')}
                     </div>
                   </div>
                   <Slot id="email-detail:header" email={selectedEmail} />
@@ -983,7 +1011,8 @@ export default function App() {
               </div>
             )}
           </div>
-        </>
+          </Panel>
+        </PanelGroup>
       )}
     </div>
   );

@@ -134,7 +134,7 @@ function SignatureSettings() {
         <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase">Signatures</h3>
         <button
           onClick={() => startEdit()}
-          className="flex items-center gap-1.5 text-sm bg-[#004f96] text-white px-3 py-1.5 rounded-md hover:bg-[#003b73] transition-colors"
+          className="flex items-center gap-1 text-xs font-semibold text-[#004f96] hover:bg-[var(--c-selected)] px-3 py-1.5 rounded-full transition-colors"
         >
           + New Signature
         </button>

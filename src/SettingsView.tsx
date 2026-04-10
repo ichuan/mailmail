@@ -29,6 +29,8 @@ export default function SettingsView() {
   };
 
   const handleShowImagesToggle = async (enabled: boolean) => {
+    // Warn about privacy when enabling remote images
+    if (enabled && !window.confirm('Enabling remote images may allow senders to track when you read emails. Continue?')) return;
     setShowImages(enabled);
     try {
       await invoke('save_setting', { key: 'showImages', value: String(enabled) });
@@ -47,7 +49,7 @@ export default function SettingsView() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col pt-8 px-12 text-[var(--c-text)] bg-[var(--c-panel)]">
+    <div className="w-full h-full flex flex-col pt-8 px-12 pb-12 text-[var(--c-text)] bg-[var(--c-panel)]">
       <div className="flex justify-between items-center mb-10 w-full max-w-4xl mx-auto">
         <div>
           <h2 className="text-3xl font-bold tracking-tight mb-2">Settings</h2>
@@ -169,6 +171,9 @@ export default function SettingsView() {
            </div>
         </section>
 
+        {/* settings:sections slot — plugins (e.g. Signatures) render here */}
+        <Slot id="settings:sections" />
+
         {/* Security & Storage info card */}
         <section>
           <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase mb-4">Security &amp; Storage</h3>
@@ -199,8 +204,13 @@ export default function SettingsView() {
             </div>
           </div>
         </section>
-        {/* settings:sections slot — plugins can append sections here */}
-        <Slot id="settings:sections" />
+
+        {/* About */}
+        <section className="border-t border-[var(--c-border)] pt-6 text-center">
+          <p className="text-sm font-semibold text-[var(--c-text-mid)]">MailMail</p>
+          <p className="text-xs text-[var(--c-text-muted)] mt-1">Version 0.1.0</p>
+          <p className="text-xs text-[var(--c-text-muted)] mt-0.5">&copy; {new Date().getFullYear()} MailMail. All rights reserved.</p>
+        </section>
       </div>
     </div>
   );

@@ -86,11 +86,20 @@ export default function ComposeView() {
     }
   };
 
+  // Derive title from compose context
+  const composeTitle = (() => {
+    if (!composeState) return 'New Message';
+    const sub = composeState.subject ?? '';
+    if (sub.startsWith('Fwd:')) return 'Forward';
+    if (composeState.inReplyTo || sub.startsWith('Re:')) return 'Reply';
+    return 'New Message';
+  })();
+
   return (
     <div className="w-full h-full flex flex-col bg-[var(--c-bg)] text-[var(--c-text)]">
       <div className="h-14 border-b border-[var(--c-border)] flex items-center px-6 justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold">New Message</h2>
+          <h2 className="text-lg font-semibold">{composeTitle}</h2>
           {draftSaved && (
             <span className="flex items-center gap-1 text-xs text-[var(--c-text-muted)]">
               <Save size={11} />
