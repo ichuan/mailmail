@@ -52,9 +52,79 @@ function cx(...inputs: (string | undefined | null | false)[]) {
  * display:none via CSS still fires HTTP requests; DOM removal does not.
  * This is the correct approach for preventing email tracker pixels.
  */
-function sanitizeEmailHtml(html: string, allowImages: boolean): string {
+export function sanitizeEmailHtml(html: string, allowImages: boolean): string {
   if (allowImages) return html;
   return html.replace(/<img[^>]*\/?>/gi, '');
+}
+
+/**
+ * Build a complete HTML document for iframe srcdoc injection.
+ * Injects minimal typography CSS so emails are readable in both themes.
+ * The resulting doc is loaded into a sandboxed iframe (no scripts),
+ * so we can safely include email body HTML that ammonia has already cleaned.
+ */
+export function buildIframeSrcDoc(html: string, isDark: boolean): string {
+  const text   = isDark ? '#e8eaed' : '#1a1a1a';
+  const link   = isDark ? '#7ab3ef' : '#004f96';
+  const quote  = isDark ? '#888' : '#666';
+  const qBdr   = isDark ? '#444' : '#ddd';
+  const codeBg = isDark ? '#2a2a2a' : '#f5f5f5';
+  const css = [
+    'html,body{margin:0;padding:0;background:transparent;overflow-x:hidden;}',
+    `body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;`,
+    `font-size:15px;line-height:1.6;color:${text};word-wrap:break-word;overflow-wrap:break-word;}`,
+    `a{color:${link};}`,
+    'img{max-width:100%;height:auto;}',
+    `blockquote{border-left:3px solid ${qBdr};margin:.5em 0;padding-left:1em;color:${quote};}`,
+    `pre,code{background:${codeBg};border-radius:3px;font-family:Consolas,monospace;font-size:.9em;}`,
+    'pre{padding:.75em;overflow-x:auto;}code{padding:.15em .3em;}',
+    'table{border-collapse:collapse;max-width:100%;}td,th{padding:4px 8px;}',
+  ].join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${html}</body></html>`;
+}
+
+/**
+ * Renders HTML email content inside a sandboxed iframe.
+ *
+ * Security model:
+ *  - sandbox="allow-same-origin" blocks script execution, form submission, and
+ *    top-level navigation while allowing the parent to read iframe DOM for height.
+ *  - Link clicks are intercepted from the parent via contentDocument event listener
+ *    and routed through tauri-plugin-shell so they open in the system browser.
+ *  - Image stripping (tracker prevention) is applied before srcdoc injection.
+ */
+function EmailHtmlViewer({ html, isDark, showImages }: { html: string; isDark: boolean; showImages: boolean }) {
+  const [height, setHeight] = useState(400);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const srcDoc = buildIframeSrcDoc(sanitizeEmailHtml(html, showImages), isDark);
+
+  const handleLoad = useCallback(() => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    // Auto-size the iframe to its content so no internal scrollbar appears.
+    const contentHeight = doc.documentElement.scrollHeight || doc.body?.scrollHeight || 400;
+    setHeight(contentHeight);
+    // Route all link clicks through Tauri shell to open the system browser.
+    // This replaces the onClick delegation that worked on the outer div before.
+    doc.addEventListener('click', (e) => {
+      const anchor = (e.target as Element)?.closest?.('a');
+      if (anchor instanceof HTMLAnchorElement && anchor.href) {
+        e.preventDefault();
+        openExternal(anchor.href).catch(console.error);
+      }
+    });
+  }, []);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-same-origin"
+      srcDoc={srcDoc}
+      title="Email content"
+      onLoad={handleLoad}
+      style={{ width: '100%', border: 'none', display: 'block', height: `${height}px` }}
+    />
+  );
 }
 
 /**
@@ -947,25 +1017,15 @@ export default function App() {
                     </div>
                   </div>
                   <Slot id="email-detail:header" email={selectedEmail} />
-                  {/* Body: strip img tags (not CSS) when showImages is off
-                      so tracker pixel HTTP requests are never fired. */}
-                  <div
-                    className="text-[15px] leading-relaxed text-[var(--c-text)]"
-                    onClick={(e) => {
-                      const target = (e.target as HTMLElement).closest('a');
-                      if (target?.href) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openExternal(target.href).catch(console.error);
-                      }
-                    }}
-                  >
-                    {selectedEmail.bodyHtml ? (
-                      <div dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(selectedEmail.bodyHtml, showImages) }} />
-                    ) : (
-                      <div className="whitespace-pre-wrap">{selectedEmail.bodyText}</div>
-                    )}
-                  </div>
+                  {/* Body: rendered in a sandboxed iframe (blocks scripts/forms) for
+                      XSS isolation. Link clicks are intercepted → system browser. */}
+                  {selectedEmail.bodyHtml ? (
+                    <EmailHtmlViewer html={selectedEmail.bodyHtml} isDark={theme === 'dark'} showImages={showImages} />
+                  ) : (
+                    <div className="text-[15px] leading-relaxed text-[var(--c-text)] whitespace-pre-wrap">
+                      {selectedEmail.bodyText}
+                    </div>
+                  )}
                   <Slot id="email-detail:footer" email={selectedEmail} />
                   {/* Attachment panel — shown only when this email has attachments */}
                   {attachments.length > 0 && (

@@ -3,8 +3,37 @@ use mailparse::parse_mail;
 use ammonia;
 use futures::StreamExt;
 use std::time::Duration;
+use std::borrow::Cow;
 use async_imap::extensions::idle::IdleResponse;
 use tauri::Emitter;
+
+/// Remove all `url(...)` references from a CSS value string.
+/// Prevents CSS-based tracking pixels that could send HTTP requests even without
+/// JavaScript (e.g. `background: url(https://tracker.example/pixel.gif)`).
+/// Handles unquoted, single-quoted, and double-quoted url() forms.
+fn strip_css_url_refs(style: &str) -> String {
+    let mut out = String::with_capacity(style.len());
+    let mut tail = style;
+    loop {
+        let lower_tail = tail.to_ascii_lowercase();
+        match lower_tail.find("url(") {
+            None => {
+                out.push_str(tail);
+                break;
+            }
+            Some(i) => {
+                out.push_str(&tail[..i]);
+                let rest = &tail[i + 4..];
+                // Skip to matching ')' — handles quoted and unquoted forms
+                match rest.find(')') {
+                    Some(j) => tail = &rest[j + 1..],
+                    None => break, // malformed CSS, stop safely
+                }
+            }
+        }
+    }
+    out
+}
 
 /// Decode RFC 2047 encoded words that mailparse::get_value() may leave undecoded
 /// (e.g. folded multi-line subjects, non-standard whitespace between encoded words).
@@ -388,16 +417,24 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
             let mut body_html = String::new();
             extract_body_recursive(&parsed, &mut body_text, &mut body_html);
 
-            let clean_html = if !body_html.is_empty() {
+                let clean_html = if !body_html.is_empty() {
                 // Use ammonia Builder to:
                 // - Preserve inline style attributes so HTML email layouts render correctly
-                // - Allow img tags so embedded images are visible (frontend can hide them with CSS)
-                // The style attribute can contain tracking URLs; this is an accepted tradeoff
-                // consistent with standard email client behavior.
+                // - Allow img tags so embedded images are visible (frontend can hide them)
+                // - Strip url() from style values to block CSS-based tracking pixels
                 let cleaned = ammonia::Builder::default()
                     .add_tags(&["img"])
                     .add_tag_attributes("img", &["src", "alt", "width", "height", "style"])
                     .add_generic_attributes(&["style"])
+                    .attribute_filter(|_element, attribute, value| {
+                        if attribute == "style" {
+                            // Remove url() references from inline styles to prevent
+                            // CSS tracking pixels (e.g. background:url(tracker.gif))
+                            Some(Cow::Owned(strip_css_url_refs(value)))
+                        } else {
+                            Some(Cow::Borrowed(value))
+                        }
+                    })
                     .clean(&body_html)
                     .to_string();
                 Some(cleaned)
@@ -579,3 +616,55 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
         tokio::time::sleep(Duration::from_secs(15)).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::strip_css_url_refs;
+
+    #[test]
+    fn test_strip_css_url_unquoted() {
+        let input = "background: url(https://tracker.example/pixel.gif); color: red;";
+        let result = strip_css_url_refs(input);
+        assert!(!result.contains("url("), "url() should be removed");
+        assert!(result.contains("color: red"), "non-url properties preserved");
+    }
+
+    #[test]
+    fn test_strip_css_url_double_quoted() {
+        let input = r#"background-image: url("https://example.com/bg.png")"#;
+        let result = strip_css_url_refs(input);
+        assert!(!result.contains("url("));
+        assert!(result.contains("background-image:"));
+    }
+
+    #[test]
+    fn test_strip_css_url_single_quoted() {
+        let input = "background: url('https://example.com/tracker.gif') no-repeat;";
+        let result = strip_css_url_refs(input);
+        assert!(!result.contains("url("));
+        assert!(result.contains("no-repeat"));
+    }
+
+    #[test]
+    fn test_strip_css_url_case_insensitive() {
+        let input = "background: URL(https://tracker.example/pixel.gif);";
+        let result = strip_css_url_refs(input);
+        assert!(!result.to_lowercase().contains("url("));
+    }
+
+    #[test]
+    fn test_strip_css_url_no_urls() {
+        let input = "color: red; font-size: 14px; margin: 0;";
+        let result = strip_css_url_refs(input);
+        assert_eq!(result, input, "style without urls should be unchanged");
+    }
+
+    #[test]
+    fn test_strip_css_url_multiple() {
+        let input = "background: url(a.gif); border-image: url(b.png); color: blue;";
+        let result = strip_css_url_refs(input);
+        assert!(!result.contains("url("));
+        assert!(result.contains("color: blue"));
+    }
+}
+
