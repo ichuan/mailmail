@@ -322,9 +322,9 @@ export default function App() {
     }
   };
 
-  const handleReply = (email: Email) => {
+  const handleReply = useCallback((email: Email) => {
     const replyTo = email.senderEmail || email.sender;
-    const dateStr = format(new Date(email.timestamp), 'EEE, MMM d, yyyy \u2019at\u2019 h:mm a');
+    const dateStr = format(new Date(email.timestamp), "EEE, MMM d, yyyy 'at' h:mm a");
     const originalLines = (email.bodyText || '').split('\n');
     // RFC-style quoting: prefix each line with '>'
     const quoted = originalLines.map(l => `> ${l}`).join('\n');
@@ -334,18 +334,18 @@ export default function App() {
       body: `\n\nOn ${dateStr}, ${email.sender} <${email.senderEmail}> wrote:\n${quoted}`,
       fromAccountId: accounts.find(a => a.id === email.accountId)?.id,
     });
-  };
+  }, [openCompose, accounts]);
 
-  const handleForward = (email: Email) => {
+  const handleForward = useCallback((email: Email) => {
     openCompose({
       to: '',
       subject: email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`,
       body: `\n\n--- Forwarded Message ---\nFrom: ${email.sender}\nDate: ${email.timestamp}\nSubject: ${email.subject}\n\n${email.bodyText || ''}`,
       fromAccountId: accounts.find(a => a.id === email.accountId)?.id,
     });
-  };
+  }, [openCompose, accounts]);
 
-  const handleReplyAll = (email: Email) => {
+  const handleReplyAll = useCallback((email: Email) => {
     const dateStr = format(new Date(email.timestamp), "EEE, MMM d, yyyy 'at' h:mm a");
     const originalLines = (email.bodyText || '').split('\n');
     const quoted = originalLines.map(l => `> ${l}`).join('\n');
@@ -363,11 +363,16 @@ export default function App() {
       body: `\n\nOn ${dateStr}, ${email.sender} <${email.senderEmail}> wrote:\n${quoted}`,
       fromAccountId: fromAccount?.id,
     });
-  };
+  }, [openCompose, accounts]);
 
-  const handleDeleteEmail = async (email: Email) => {
+  const handleDeleteEmail = useCallback(async (email: Email) => {
     const account = accounts.find(a => a.id === email.accountId);
-    if (!account) return;
+    if (!account) {
+      showSyncError('Cannot delete: account not found');
+      return;
+    }
+    // Optimistically remove from UI so the interaction feels immediate.
+    removeEmail(email.id);
     try {
       await invoke('delete_email', {
         account,
@@ -375,11 +380,13 @@ export default function App() {
         uid: email.uid,
         emailId: email.id,
       });
-      removeEmail(email.id);
     } catch (err) {
-      console.error("Failed to delete email:", err);
+      // Restore the email on failure so nothing is lost.
+      useMailStore.getState().addEmails([email]);
+      showSyncError(`Delete failed: ${String(err)}`);
+      console.error('Failed to delete email:', err);
     }
-  };
+  }, [accounts, removeEmail, showSyncError]);
 
   // Persist read state to DB so it survives folder switches and app restarts.
   // selectEmail() only updates in-memory; this call syncs the DB.
@@ -546,7 +553,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [visibleEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleForward, handleDeleteEmail, openCompose, selectEmail]);
+  }, [visibleEmails, selectedEmailId, selectedEmail, handleSelectEmail, handleReply, handleReplyAll, handleForward, handleDeleteEmail, openCompose, selectEmail]);
 
   return (
     // onClick on root dismisses the context menu on any outside click
@@ -578,6 +585,7 @@ export default function App() {
                   closeCtxMenu();
                 }} />
                 <CtxItem label="Reply" onClick={() => { handleReply(e); closeCtxMenu(); }} />
+                <CtxItem label="Reply All" onClick={() => { handleReplyAll(e); closeCtxMenu(); }} />
                 <CtxItem label="Forward" onClick={() => { handleForward(e); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
                 <CtxItem label="Delete" danger onClick={() => { handleDeleteEmail(e); closeCtxMenu(); }} />
