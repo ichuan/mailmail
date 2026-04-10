@@ -1,19 +1,62 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
-import { X, Send } from 'lucide-react';
+import { X, Send, Save } from 'lucide-react';
 import { Slot } from './core/slot-registry';
+
+const DRAFT_KEY = 'mailmail:draft';
+
+interface DraftData {
+  to: string;
+  subject: string;
+  body: string;
+  accountId: string;
+}
 
 export default function ComposeView() {
   const { accounts, composeState, closeCompose } = useMailStore();
-  const [to, setTo] = useState(composeState?.to ?? '');
-  const [subject, setSubject] = useState(composeState?.subject ?? '');
-  const [body, setBody] = useState(composeState?.body ?? '');
+
+  // Restore draft only for fresh compose (not reply/forward which pre-fill recipients)
+  const isReply = !!(composeState?.inReplyTo || (composeState?.to && composeState.to !== ''));
+  const savedDraft: DraftData | null = (() => {
+    if (isReply) return null;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      return raw ? (JSON.parse(raw) as DraftData) : null;
+    } catch { return null; }
+  })();
+
+  const [to, setTo] = useState(composeState?.to ?? savedDraft?.to ?? '');
+  const [subject, setSubject] = useState(composeState?.subject ?? savedDraft?.subject ?? '');
+  const [body, setBody] = useState(composeState?.body ?? savedDraft?.body ?? '');
   const [selectedAccountId, setSelectedAccountId] = useState(
-    composeState?.fromAccountId ?? accounts[0]?.id ?? ''
+    composeState?.fromAccountId ?? savedDraft?.accountId ?? accounts[0]?.id ?? ''
   );
   const [sending, setSending] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-save draft to localStorage after 600ms of inactivity — only for fresh composes.
+  useEffect(() => {
+    if (isReply) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const draft: DraftData = { to, subject, body, accountId: selectedAccountId };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      setDraftSaved(true);
+      if (draftIndicatorTimerRef.current) clearTimeout(draftIndicatorTimerRef.current);
+      draftIndicatorTimerRef.current = setTimeout(() => setDraftSaved(false), 2000);
+    }, 600);
+    return () => { if (draftTimerRef.current) clearTimeout(draftTimerRef.current); };
+  }, [to, subject, body, selectedAccountId, isReply]);
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    closeCompose();
+  };
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId);
 
@@ -33,6 +76,8 @@ export default function ComposeView() {
         body,
         inReplyTo: composeState?.inReplyTo ?? null,
       });
+      // Clear draft on successful send
+      localStorage.removeItem(DRAFT_KEY);
       closeCompose();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -44,7 +89,15 @@ export default function ComposeView() {
   return (
     <div className="w-full h-full flex flex-col bg-[var(--c-bg)] text-[var(--c-text)]">
       <div className="h-14 border-b border-[var(--c-border)] flex items-center px-6 justify-between flex-shrink-0">
-        <h2 className="text-lg font-semibold">New Message</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold">New Message</h2>
+          {draftSaved && (
+            <span className="flex items-center gap-1 text-xs text-[var(--c-text-muted)]">
+              <Save size={11} />
+              Draft saved
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleSend}
@@ -54,7 +107,7 @@ export default function ComposeView() {
             <Send size={14} />
             {sending ? 'Sending...' : 'Send'}
           </button>
-          <button onClick={closeCompose} className="p-2 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors">
+          <button onClick={discardDraft} className="p-2 hover:bg-[var(--c-hover)] rounded-md text-[var(--c-text-muted)] transition-colors">
             <X size={18} />
           </button>
         </div>
