@@ -281,6 +281,7 @@ export function deactivate(): void {
 | `src/plugins/signature/` | ✅ 已创建 | 签名 CRUD，`compose:footer` 槽位注入，设置页 UI |
 | `src/plugins/star/` | ✅ 已创建 | 星标切换插件，`toolbar:actions` 槽位，调用 `toggle_star` |
 | `src/plugins/notification/` | ✅ 已创建 | 桌面通知插件，Web Notification API，监听 `email:received` |
+| `src/plugins/print/` | ✅ 已创建 | 打印插件，Rust `print_email` 命令 + WebView 窗口 + 原生打印对话框 |
 
 ---
 
@@ -292,7 +293,7 @@ export function deactivate(): void {
 | ⭐⭐⭐ | `@mm/keybindings` | 低 | 全局键盘快捷键表（j/k 导航、r 回复、d 删除等）；可配置；设置页 UI | `settings:sections`、EventBus commands |
 | ⭐⭐ | `@mm/undo-send` | 中 | 发送后延迟 5 s 可取消；倒计时 Toast；监听 `email:before-send` 拦截 | `compose:footer`，`email:before-send` |
 | ⭐⭐ | `@mm/markdown-compose` | 中 | ComposeView Markdown 编辑器（基于 CodeMirror）；预览切换；渲染后转 HTML 发送 | `compose:footer` |
-| ⭐ | `@mm/print` | 低 | 当前邮件打印专用 CSS + `window.print()` 触发；按钮注入工具栏 | `toolbar:actions` |
+| ⭐ | `@mm/print` | 低 | ~~已完成~~ — Rust `print_email` 命令构建打印 HTML，独立 WebView 窗口触发原生打印 | `toolbar:actions` |
 | ⭐ | `@mm/templates` | 低 | 用户保存邮件模板；写信时一键填入；存 `plugin.storage` | `compose:footer` |
 
 ### `@mm/labels` 设计要点
@@ -323,4 +324,5 @@ export function deactivate(): void {
 | `src/plugins/signature/` | 内置插件：邮件签名 |
 | `src/plugins/star/` | 内置插件：星标切换 |
 | `src/plugins/notification/` | 内置插件：桌面通知 |
+| `src/plugins/print/` | 内置插件：打印邮件（Rust 原生窗口）|
 
