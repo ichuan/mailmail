@@ -48,6 +48,16 @@ function cx(...inputs: (string | undefined | null | false)[]) {
 }
 
 /**
+ * Extract the bare email address from an RFC 5322 address string.
+ * Handles both "Display Name <user@host>" and plain "user@host" forms.
+ * Used for normalization when deduplicating Reply All recipient lists.
+ */
+export function extractEmailAddr(addr: string): string {
+  const match = addr.match(/<([^>]+)>/);
+  return (match ? match[1] : addr).trim().toLowerCase();
+}
+
+/**
  * Strip <img> tags from HTML so remote images are never loaded.
  * display:none via CSS still fires HTTP requests; DOM removal does not.
  * This is the correct approach for preventing email tracker pixels.
@@ -430,12 +440,21 @@ export default function App() {
     const originalLines = (email.bodyText || '').split('\n');
     const quoted = originalLines.map(l => `> ${l}`).join('\n');
     // Collect all recipient addresses, deduplicate, exclude the sending account's own address.
+    // Addresses may arrive as "Display Name <user@host>" — normalize to bare email for comparison
+    // but preserve the original string so display names are kept in the composed To: field.
     const fromAccount = accounts.find(a => a.id === email.accountId);
     const ownEmail = fromAccount?.email.toLowerCase() ?? '';
     const replyTo = email.senderEmail || email.sender;
-    const toList = [replyTo, ...(email.recipient ? email.recipient.split(',').map(s => s.trim()) : [])]
-      .filter(addr => addr && addr.toLowerCase() !== ownEmail)
-      .filter((addr, i, arr) => arr.indexOf(addr) === i) // deduplicate
+    const rawAddrs = [replyTo, ...(email.recipient ? email.recipient.split(',').map(s => s.trim()) : [])];
+    const seen = new Set<string>();
+    const toList = rawAddrs
+      .filter(addr => {
+        if (!addr) return false;
+        const normalized = extractEmailAddr(addr);
+        if (normalized === ownEmail || seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      })
       .join(', ');
     openCompose({
       to: toList,
