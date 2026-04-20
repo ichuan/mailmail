@@ -759,7 +759,7 @@ export default function App() {
 
       <PanelGroup direction="horizontal">
       {/* LEFT PANE: SIDEBAR */}
-      <Panel id="sidebar" defaultSize={sidebarLayout ?? "18%"} minSize="12%" maxSize="30%"
+      <Panel id="sidebar" defaultSize={sidebarLayout ?? 18} minSize={12} maxSize={30}
         onResize={(size) => { try { localStorage.setItem('mailmail-sidebar-v1', JSON.stringify(size)); } catch {} }}
       >
       <div
@@ -906,7 +906,7 @@ export default function App() {
       <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
       {/* MAIN CONTENT AREA */}
-      <Panel id="main" defaultSize="82%">
+      <Panel id="main" defaultSize={82}>
       {activeView === 'settings' ? (
         <div className="h-full bg-[var(--c-panel)] overflow-y-auto w-full">
            <SettingsView />
@@ -925,7 +925,7 @@ export default function App() {
           onLayoutChanged={(layout) => { try { localStorage.setItem('mailmail-panels-v3', JSON.stringify(layout)); } catch {} }}
         >
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <Panel id="list" defaultSize="30%" minSize="25%" maxSize="55%">
+          <Panel id="list" defaultSize={panelLayout?.[0] ?? 30} minSize={25} maxSize={55}>
           <div className="h-full flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
             {/* Search bar only — folder name + refresh moved to sidebar */}
             <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
@@ -1006,7 +1006,7 @@ export default function App() {
           <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
           {/* RIGHT PANE: READING VIEW */}
-          <Panel id="reading" defaultSize="70%" minSize="40%">
+          <Panel id="reading" defaultSize={panelLayout?.[1] ?? 70} minSize={40}>
           <div className="h-full flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
