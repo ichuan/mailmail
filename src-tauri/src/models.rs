@@ -63,6 +63,14 @@ pub struct Signature {
     pub is_default: bool,
 }
 
+/// A contact suggestion derived from historical email senders and recipients.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Contact {
+    pub name: String,
+    pub email: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

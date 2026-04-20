@@ -43,6 +43,7 @@ import { eventBus } from './core/event-bus';
 import { useI18n } from './i18n';
 import { useToast } from './components/Toast';
 import { useConfirm } from './components/AlertDialog';
+import ShortcutsPanel from './components/ShortcutsPanel';
 
 // Special virtual folder key that aggregates all accounts' inboxes.
 export const ALL_INBOXES = '__all__';
@@ -209,6 +210,9 @@ export default function App() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
+
+  // Keyboard shortcuts overlay visibility
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Restore saved panel layouts from localStorage.
   // v4 layout format: { [panelId: string]: number } (percentage 0..100)
@@ -670,6 +674,10 @@ export default function App() {
         case 'Escape':
           selectEmail('');
           break;
+        case '?':
+          e.preventDefault();
+          setShowShortcuts(prev => !prev);
+          break;
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -681,6 +689,8 @@ export default function App() {
       className={cx("flex h-screen w-screen bg-[var(--c-bg)] text-[var(--c-text)] font-sans overflow-hidden", theme === 'dark' && 'dark')}
       onClick={closeCtxMenu}
     >
+      {/* Keyboard shortcuts overlay */}
+      <ShortcutsPanel open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       {/* Context menu overlay — rendered outside PanelGroup so it floats above everything */}
       {ctxMenu && (
         <div
