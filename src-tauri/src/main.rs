@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
-use crate::models::{Account, Email, Signature, Attachment};
+use crate::models::{Account, Email, Signature, Attachment, Contact};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 
 struct AppState {
@@ -338,6 +338,12 @@ async fn delete_signature(state: State<'_, Arc<AppState>>, id: String) -> Result
     get_db(&guard)?.delete_signature(&id).await
 }
 
+#[tauri::command]
+async fn suggest_contacts(state: State<'_, Arc<AppState>>, query: String) -> Result<Vec<Contact>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.suggest_contacts(&query).await
+}
+
 /// Escape HTML special characters to prevent injection in the print template.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -455,6 +461,7 @@ fn main() {
             delete_email,
             search_emails,
             print_email,
+            suggest_contacts,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

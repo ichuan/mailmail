@@ -467,6 +467,65 @@ impl Db {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    /// Return up to 10 unique contacts matching `query` (prefix on display name or email).
+    ///
+    /// Contacts are derived from the emails table: we collect (sender, sender_email) from
+    /// received messages and (recipient) from sent messages, then deduplicate by email address.
+    /// Results are ordered by most-recently-seen first so frequent contacts appear at the top.
+    pub async fn suggest_contacts(&self, query: &str) -> Result<Vec<crate::models::Contact>, String> {
+        let pattern = format!("%{}%", query);
+
+        // Collect from received messages: sender + sender_email columns.
+        // Collect from sent messages: recipient field (may be "Name <email>" or bare email).
+        let rows = sqlx::query(
+            "SELECT sender AS name, sender_email AS email, MAX(timestamp) AS last_seen \
+             FROM emails \
+             WHERE sender_email != '' \
+               AND (sender LIKE ? OR sender_email LIKE ?) \
+             GROUP BY lower(sender_email) \
+             UNION ALL \
+             SELECT '' AS name, recipient AS email, MAX(timestamp) AS last_seen \
+             FROM emails \
+             WHERE folder = 'sent' AND recipient != '' \
+               AND recipient LIKE ? \
+             GROUP BY lower(recipient) \
+             ORDER BY last_seen DESC \
+             LIMIT 30"
+        )
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        // Deduplicate by normalized email address, keep first occurrence (most recent).
+        let mut seen = std::collections::HashSet::new();
+        let mut contacts = Vec::new();
+        for row in rows {
+            let raw_email: String = row.try_get("email").unwrap_or_default();
+            let name: String = row.try_get("name").unwrap_or_default();
+
+            // Normalize: extract bare email from "Name <email>" if needed.
+            let bare = if let (Some(s), Some(e)) = (raw_email.find('<'), raw_email.rfind('>')) {
+                raw_email[s + 1..e].trim().to_lowercase()
+            } else {
+                raw_email.trim().to_lowercase()
+            };
+
+            if bare.is_empty() || bare.contains(' ') { continue; }
+            if seen.contains(&bare) { continue; }
+            seen.insert(bare.clone());
+
+            contacts.push(crate::models::Contact {
+                name: if name.is_empty() { bare.clone() } else { name },
+                email: bare,
+            });
+            if contacts.len() >= 10 { break; }
+        }
+        Ok(contacts)
+    }
 }
 
 #[cfg(test)]
@@ -725,5 +784,50 @@ mod tests {
 
         let data = db.get_attachment_data("email-42_att_0").await.unwrap();
         assert_eq!(data, b"fake-pdf-bytes");
+    }
+
+    #[tokio::test]
+    async fn test_suggest_contacts() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+
+        // Insert an email with a known sender so it appears in suggestions.
+        let mut email = test_email("acc-1", 1);
+        email.sender = "Alice Smith".to_string();
+        email.sender_email = "alice@example.com".to_string();
+        db.upsert_email(&email).await.unwrap();
+
+        // Insert a second email so we can verify deduplication.
+        let mut email2 = test_email("acc-1", 2);
+        email2.sender = "Alice Smith".to_string();
+        email2.sender_email = "alice@example.com".to_string();
+        email2.subject = "Second message from Alice".to_string();
+        db.upsert_email(&email2).await.unwrap();
+
+        // Insert an unrelated sender to verify filtering.
+        let mut email3 = test_email("acc-1", 3);
+        email3.sender = "Bob Jones".to_string();
+        email3.sender_email = "bob@example.com".to_string();
+        email3.subject = "Hello from Bob".to_string();
+        db.upsert_email(&email3).await.unwrap();
+
+        // Should match Alice by name prefix (case-insensitive).
+        let contacts = db.suggest_contacts("alice").await.unwrap();
+        assert_eq!(contacts.len(), 1, "deduplication should yield exactly one Alice");
+        assert_eq!(contacts[0].email, "alice@example.com");
+        assert_eq!(contacts[0].name, "Alice Smith");
+
+        // Should match Alice by email prefix.
+        let contacts2 = db.suggest_contacts("alice@ex").await.unwrap();
+        assert_eq!(contacts2.len(), 1);
+        assert_eq!(contacts2[0].email, "alice@example.com");
+
+        // Query that matches nobody.
+        let contacts3 = db.suggest_contacts("zzznomatch").await.unwrap();
+        assert!(contacts3.is_empty(), "unexpected result for no-match query");
+
+        // Query broad enough to match both Alice and Bob.
+        let contacts4 = db.suggest_contacts("example.com").await.unwrap();
+        assert_eq!(contacts4.len(), 2);
     }
 }

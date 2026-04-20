@@ -8,6 +8,27 @@ import { useToast } from './components/Toast';
 
 const DRAFT_KEY = 'mailmail:draft';
 
+export interface Contact {
+  name: string;
+  email: string;
+}
+
+/**
+ * Replace the last comma-separated token in `currentTo` with the selected contact.
+ * Pure function — no side effects, easy to unit test.
+ *
+ * Example:
+ *   buildToWithContact("alice@ex, bob", { name: "Bob Lee", email: "bob@ex.com" })
+ *   => "alice@ex,  Bob Lee <bob@ex.com>"
+ */
+export function buildToWithContact(currentTo: string, contact: Contact): string {
+  const tokens = currentTo.split(',');
+  tokens[tokens.length - 1] = tokens.length > 1
+    ? ` ${contact.name} <${contact.email}>`
+    : `${contact.name} <${contact.email}>`;
+  return tokens.join(',');
+}
+
 interface DraftData {
   to: string;
   subject: string;
@@ -15,10 +36,35 @@ interface DraftData {
   accountId: string;
 }
 
+/**
+ * Schedule a send with an undo window.
+ *
+ * Calls `sendFn` after `delayMs` unless `cancel()` is called first.
+ * Returns a handle with a `cancel()` method.
+ * Pure function — no side effects beyond the timer, easy to unit test.
+ */
+export function scheduleSend(
+  sendFn: () => Promise<void>,
+  delayMs: number,
+): { cancel: () => void } {
+  let cancelled = false;
+  const timer = setTimeout(async () => {
+    if (!cancelled) {
+      await sendFn();
+    }
+  }, delayMs);
+  return {
+    cancel: () => {
+      cancelled = true;
+      clearTimeout(timer);
+    },
+  };
+}
+
 export default function ComposeView() {
   const { accounts, composeState, closeCompose } = useMailStore();
   const { t } = useI18n();
-  const { toast } = useToast();
+  const { toast, toastWithAction } = useToast();
 
   // Restore draft only for fresh compose (not reply/forward which pre-fill recipients)
   const isReply = !!(composeState?.inReplyTo || (composeState?.to && composeState.to !== ''));
@@ -40,6 +86,14 @@ export default function ComposeView() {
   const [errorMsg, setErrorMsg] = useState('');
   const [draftSaved, setDraftSaved] = useState(false);
 
+  // Holds the cancel handle when a send is pending the undo window.
+  const undoSendRef = useRef<{ cancel: () => void } | null>(null);
+
+  // Contact autocomplete state
+  const [contactSuggestions, setContactSuggestions] = useState<Contact[]>([]);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
+  const contactDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,6 +111,51 @@ export default function ComposeView() {
     return () => { if (draftTimerRef.current) clearTimeout(draftTimerRef.current); };
   }, [to, subject, body, selectedAccountId, isReply]);
 
+  const handleToChange = (value: string) => {
+    setTo(value);
+    setSuggestionIndex(-1);
+    if (contactDebounceRef.current) clearTimeout(contactDebounceRef.current);
+    // Extract the last address token (after the last comma) as the query.
+    const lastToken = value.split(',').pop()?.trim() ?? '';
+    if (lastToken.length < 1) {
+      setContactSuggestions([]);
+      return;
+    }
+    contactDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await invoke<Contact[]>('suggest_contacts', { query: lastToken });
+        setContactSuggestions(results);
+      } catch {
+        setContactSuggestions([]);
+      }
+    }, 150);
+  };
+
+  const applyContactSuggestion = (contact: Contact) => {
+    // Replace the last token in the comma list with "Name <email>".
+    setTo(buildToWithContact(to, contact));
+    setContactSuggestions([]);
+    setSuggestionIndex(-1);
+  };
+
+  const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (contactSuggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSuggestionIndex(i => Math.min(i + 1, contactSuggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSuggestionIndex(i => Math.max(i - 1, -1));
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (suggestionIndex >= 0) {
+        e.preventDefault();
+        applyContactSuggestion(contactSuggestions[suggestionIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setContactSuggestions([]);
+    }
+  };
+
   const discardDraft = () => {
     localStorage.removeItem(DRAFT_KEY);
     closeCompose();
@@ -70,27 +169,57 @@ export default function ComposeView() {
       setErrorMsg(t('compose.noAccount'));
       return;
     }
-    setSending(true);
+    // Prevent double-send if undo window is already active.
+    if (undoSendRef.current) return;
+
     setErrorMsg('');
-    try {
-      await invoke('send_email', {
-        account: selectedAccount,
-        to,
-        subject,
-        body,
-        inReplyTo: composeState?.inReplyTo ?? null,
-      });
-      // Clear draft on successful send
-      localStorage.removeItem(DRAFT_KEY);
-      toast('success', t('compose.sendSuccess'));
-      closeCompose();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorMsg(msg);
-      toast('error', t('compose.sendFailed', { error: msg }));
-    } finally {
-      setSending(false);
-    }
+    setSending(true);
+
+    // Capture compose values at click time so the user can keep editing.
+    const capturedTo = to;
+    const capturedSubject = subject;
+    const capturedBody = body;
+    const capturedAccount = selectedAccount;
+    const capturedInReplyTo = composeState?.inReplyTo ?? null;
+
+    const actualSend = async () => {
+      try {
+        await invoke('send_email', {
+          account: capturedAccount,
+          to: capturedTo,
+          subject: capturedSubject,
+          body: capturedBody,
+          inReplyTo: capturedInReplyTo,
+        });
+        localStorage.removeItem(DRAFT_KEY);
+        toast('success', t('compose.sendSuccess'));
+        closeCompose();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setErrorMsg(msg);
+        toast('error', t('compose.sendFailed', { error: msg }));
+      } finally {
+        setSending(false);
+        undoSendRef.current = null;
+      }
+    };
+
+    const handle = scheduleSend(actualSend, 5000);
+    undoSendRef.current = handle;
+
+    toastWithAction(
+      'info',
+      t('compose.undoSendToast'),
+      {
+        label: t('compose.undoSend'),
+        onClick: () => {
+          handle.cancel();
+          undoSendRef.current = null;
+          setSending(false);
+        },
+      },
+      5500,
+    );
   };
 
   // Derive title from compose context
@@ -149,16 +278,37 @@ export default function ComposeView() {
             </select>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 relative">
             <label className="text-sm text-[var(--c-text-muted)] w-16 text-right">{t('compose.to')}</label>
-            <input
-              type="email"
-              value={to}
-              onChange={e => setTo(e.target.value)}
-              className="flex-1 p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
-              placeholder="recipient@example.com"
-              required
-            />
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={to}
+                onChange={e => handleToChange(e.target.value)}
+                onKeyDown={handleToKeyDown}
+                onBlur={() => setTimeout(() => setContactSuggestions([]), 150)}
+                className="w-full p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
+                placeholder="recipient@example.com"
+                required
+                autoComplete="off"
+              />
+              {contactSuggestions.length > 0 && (
+                <ul className="absolute left-0 right-0 top-full mt-1 z-50 bg-[var(--c-panel)] border border-[var(--c-border)] rounded-lg shadow-lg overflow-hidden">
+                  {contactSuggestions.map((c, i) => (
+                    <li
+                      key={c.email}
+                      onMouseDown={() => applyContactSuggestion(c)}
+                      className={`px-3 py-2 text-sm cursor-pointer flex items-baseline gap-2 ${i === suggestionIndex ? 'bg-[var(--c-selected)] text-[var(--c-selected-text)]' : 'hover:bg-[var(--c-hover)] text-[var(--c-text)]'}`}
+                    >
+                      <span className="font-medium truncate">{c.name}</span>
+                      {c.name !== c.email && (
+                        <span className={`text-xs ${i === suggestionIndex ? 'text-[var(--c-selected-text)]/70' : 'text-[var(--c-text-muted)]'}`}>{c.email}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">

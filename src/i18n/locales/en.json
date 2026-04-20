@@ -48,6 +48,8 @@
   "compose.noAccount": "No account selected",
   "compose.sendSuccess": "Email sent successfully",
   "compose.sendFailed": "Send failed: {error}",
+  "compose.undoSendToast": "Sending in 5 seconds\u2026",
+  "compose.undoSend": "Undo",
   "settings.title": "Settings",
   "settings.subtitle": "Manage your mail accounts and environment preferences.",
   "settings.accountManagement": "Account Management",
@@ -102,5 +104,17 @@
   "toast.emailDeleted": "Email deleted",
   "toast.emailSent": "Email sent successfully",
   "dialog.cancel": "Cancel",
-  "dialog.confirm": "Confirm"
+  "dialog.confirm": "Confirm",
+  "shortcuts.title": "Keyboard Shortcuts",
+  "shortcuts.close": "Close",
+  "shortcuts.new": "New message",
+  "shortcuts.next": "Next email",
+  "shortcuts.prev": "Previous email",
+  "shortcuts.reply": "Reply",
+  "shortcuts.replyAll": "Reply All",
+  "shortcuts.forward": "Forward",
+  "shortcuts.delete": "Delete email",
+  "shortcuts.toggleRead": "Toggle read / unread",
+  "shortcuts.deselect": "Deselect email",
+  "shortcuts.showHelp": "Show shortcut help"
 }

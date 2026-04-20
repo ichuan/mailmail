@@ -48,6 +48,8 @@
   "compose.noAccount": "未选择发件账户",
   "compose.sendSuccess": "邮件发送成功",
   "compose.sendFailed": "发送失败：{error}",
+  "compose.undoSendToast": "将在 5 秒后发送…",
+  "compose.undoSend": "撤销",
   "settings.title": "设置",
   "settings.subtitle": "管理邮件账户和偏好设置。",
   "settings.accountManagement": "账户管理",
@@ -102,5 +104,17 @@
   "toast.emailDeleted": "邮件已删除",
   "toast.emailSent": "邮件发送成功",
   "dialog.cancel": "取消",
-  "dialog.confirm": "确认"
+  "dialog.confirm": "确认",
+  "shortcuts.title": "键盘快捷键",
+  "shortcuts.close": "关闭",
+  "shortcuts.new": "新建邮件",
+  "shortcuts.next": "下一封邮件",
+  "shortcuts.prev": "上一封邮件",
+  "shortcuts.reply": "回复",
+  "shortcuts.replyAll": "全部回复",
+  "shortcuts.forward": "转发",
+  "shortcuts.delete": "删除邮件",
+  "shortcuts.toggleRead": "切换已读/未读",
+  "shortcuts.deselect": "取消选中",
+  "shortcuts.showHelp": "显示快捷键帮助"
 }
