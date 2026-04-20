@@ -100,5 +100,7 @@
   "toast.accountAdded": "Account added successfully",
   "toast.accountRemoved": "Account removed",
   "toast.emailDeleted": "Email deleted",
-  "toast.emailSent": "Email sent successfully"
+  "toast.emailSent": "Email sent successfully",
+  "dialog.cancel": "Cancel",
+  "dialog.confirm": "Confirm"
 }

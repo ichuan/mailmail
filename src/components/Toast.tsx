@@ -1,5 +1,6 @@
 import { useState, useCallback, createContext, useContext, useRef } from 'react';
 import { X, CheckCircle, AlertTriangle, Info } from 'lucide-react';
+import { useMailStore } from '../store';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -34,14 +35,20 @@ const COLORS: Record<ToastType, string> = {
 };
 
 const BG_COLORS: Record<ToastType, string> = {
-  success: 'border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800',
-  error: 'border-red-200 bg-red-50 dark:bg-red-950/40 dark:border-red-800',
-  info: 'border-blue-200 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-800',
+  // Use CSS-var-based panel background so the same classes work in both
+  // light and dark mode without needing a .dark ancestor element
+  // (the toast container is outside the App's dark-class div).
+  success: 'bg-[var(--c-panel)] border-[var(--c-border)]',
+  error:   'bg-[var(--c-panel)] border-[var(--c-border)]',
+  info:    'bg-[var(--c-panel)] border-[var(--c-border)]',
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idCounter = useRef(0);
+  // Read theme from the global Zustand store so we can apply the dark class
+  // to the toast container, which is rendered outside the App's dark-class div.
+  const theme = useMailStore((s) => s.theme);
 
   const toast = useCallback((type: ToastType, message: string, durationMs = 4000) => {
     const id = ++idCounter.current;
@@ -58,9 +65,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext value={{ toast }}>
       {children}
-      {/* Toast container — fixed bottom-right */}
+      {/* Toast container — fixed bottom-right; dark class ensures CSS vars resolve correctly */}
       {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-[99999] flex flex-col gap-2 max-w-sm pointer-events-none">
+        <div className={`fixed bottom-4 right-4 z-[99999] flex flex-col gap-2 max-w-sm pointer-events-none${theme === 'dark' ? ' dark' : ''}`}>
           {toasts.map(t => {
             const Icon = ICONS[t.type];
             return (

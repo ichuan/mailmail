@@ -3,6 +3,7 @@ import { useMailStore } from '../../store';
 import type { PluginAPI, PluginContext, PluginModule } from '../../core/plugin-api';
 import { ImageOff, Image } from 'lucide-react';
 import { useI18n } from '../../i18n';
+import { useConfirm } from '../../components/AlertDialog';
 
 /**
  * Toolbar toggle button for showing/hiding images in emails.
@@ -13,11 +14,12 @@ function ImageToggleButton() {
   const showImages = useMailStore((s) => s.showImages);
   const setShowImages = useMailStore((s) => s.setShowImages);
   const { t } = useI18n();
+  const { confirm } = useConfirm();
 
   const handleToggle = async () => {
     const next = !showImages;
     // Warn user about privacy implications before enabling remote images
-    if (next && !window.confirm(t('mail.showImagesWarning'))) return;
+    if (next && !await confirm(t('mail.showImagesWarning'))) return;
     setShowImages(next);
     try {
       await invoke('save_setting', { key: 'showImages', value: String(next) });

@@ -42,6 +42,7 @@ import { pluginManager } from './core/plugin-manager';
 import { eventBus } from './core/event-bus';
 import { useI18n } from './i18n';
 import { useToast } from './components/Toast';
+import { useConfirm } from './components/AlertDialog';
 
 // Special virtual folder key that aggregates all accounts' inboxes.
 export const ALL_INBOXES = '__all__';
@@ -207,6 +208,7 @@ export default function App() {
 
   const { t } = useI18n();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   // Restore saved panel layouts from localStorage.
   // v4 layout format: { [panelId: string]: number } (percentage 0..100)
@@ -481,7 +483,7 @@ export default function App() {
   }, [openCompose, accounts]);
 
   const handleDeleteEmail = useCallback(async (email: Email) => {
-    if (!window.confirm(t('mail.deleteConfirm', { subject: email.subject }))) return;
+    if (!await confirm(t('mail.deleteConfirm', { subject: email.subject }))) return;
 
     const account = accounts.find(a => a.id === email.accountId);
     if (!account) {
@@ -504,7 +506,7 @@ export default function App() {
       toast('error', t('mail.deleteFailed', { error: String(err) }));
       console.error('Failed to delete email:', err);
     }
-  }, [accounts, removeEmail, t, toast]);
+  }, [accounts, removeEmail, t, toast, confirm]);
 
   // Persist read state to DB so it survives folder switches and app restarts.
   // selectEmail() only updates in-memory; this call syncs the DB.
@@ -729,8 +731,8 @@ export default function App() {
               <>
                 <CtxItem label={t('account.refresh')} onClick={() => { handleManualSync(); closeCtxMenu(); }} />
                 <div className="my-1 border-t border-[var(--c-border-subtle)]" />
-                <CtxItem label={t('settings.removeAccount')} danger onClick={() => {
-                  if (window.confirm(t('account.removeConfirm', { name: acc.name }))) {
+                <CtxItem label={t('settings.removeAccount')} danger onClick={async () => {
+                  if (await confirm(t('account.removeConfirm', { name: acc.name }))) {
                     invoke('delete_account', { id: acc.id }).then(() => {
                       const s = useMailStore.getState();
                       s.setAccounts(s.accounts.filter(a => a.id !== acc.id));
@@ -790,20 +792,11 @@ export default function App() {
           <div className="px-4 mt-2">
             <h2 className="text-xs font-semibold tracking-wider text-[var(--c-text-mid)] uppercase mb-2 ml-2">{t('sidebar.favorites')}</h2>
             <nav className="space-y-0.5">
-              {accounts.length > 1 && (
-                <SidebarItem
-                  icon={<Inbox size={16} />}
-                  label={t('sidebar.allInboxes')}
-                  active={selectedFolder === ALL_INBOXES && activeView === 'mail' && !filterAccountId}
-                  onClick={() => { setFilterAccountId(null); setFolder(ALL_INBOXES); }}
-                  count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
-                />
-              )}
               <SidebarItem
                 icon={<Inbox size={16} />}
                 label={t('sidebar.inbox')}
-                active={selectedFolder === 'inbox' && activeView === 'mail' && !filterAccountId}
-                onClick={() => { setFilterAccountId(null); setFolder('inbox'); }}
+                active={(selectedFolder === ALL_INBOXES || selectedFolder === 'inbox') && activeView === 'mail' && !filterAccountId}
+                onClick={() => { setFilterAccountId(null); setFolder(ALL_INBOXES); }}
                 count={emails.filter(e => e.folder === 'inbox' && !e.read).length}
               />
               <SidebarItem
