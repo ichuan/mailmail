@@ -208,18 +208,19 @@ export default function App() {
   const { t } = useI18n();
   const { toast } = useToast();
 
-  // Restore saved panel layouts from localStorage
-  const sidebarLayout = useMemo(() => {
+  // Restore saved panel layouts from localStorage.
+  // v4 layout format: { [panelId: string]: number } (percentage 0..100)
+  const outerLayout = useMemo(() => {
     try {
-      const raw = localStorage.getItem('mailmail-sidebar-v1');
-      if (raw) return JSON.parse(raw);
+      const raw = localStorage.getItem('mailmail-outer-v2');
+      if (raw) return JSON.parse(raw) as Record<string, number>;
     } catch { /* ignore corrupt data */ }
     return undefined;
   }, []);
-  const panelLayout = useMemo(() => {
+  const innerLayout = useMemo(() => {
     try {
-      const raw = localStorage.getItem('mailmail-panels-v3');
-      if (raw) return JSON.parse(raw);
+      const raw = localStorage.getItem('mailmail-inner-v2');
+      if (raw) return JSON.parse(raw) as Record<string, number>;
     } catch { /* ignore corrupt data */ }
     return undefined;
   }, []);
@@ -757,11 +758,12 @@ export default function App() {
         </div>
       )}
 
-      <PanelGroup direction="horizontal">
-      {/* LEFT PANE: SIDEBAR */}
-      <Panel id="sidebar" defaultSize={sidebarLayout ?? 18} minSize={12} maxSize={30}
-        onResize={(size) => { try { localStorage.setItem('mailmail-sidebar-v1', JSON.stringify(size)); } catch {} }}
+      <PanelGroup orientation="horizontal"
+        defaultLayout={outerLayout}
+        onLayoutChanged={(layout) => { try { localStorage.setItem('mailmail-outer-v2', JSON.stringify(layout)); } catch {} }}
       >
+      {/* LEFT PANE: SIDEBAR */}
+      <Panel id="sidebar" defaultSize="18%" minSize="12%" maxSize="30%">
       <div
         className="h-full flex flex-col justify-between border-r border-[var(--c-border)] backdrop-blur-xl bg-[var(--c-sidebar-bg)]"
       >
@@ -906,7 +908,7 @@ export default function App() {
       <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
       {/* MAIN CONTENT AREA */}
-      <Panel id="main" defaultSize={82}>
+      <Panel id="main" defaultSize="82%">
       {activeView === 'settings' ? (
         <div className="h-full bg-[var(--c-panel)] overflow-y-auto w-full">
            <SettingsView />
@@ -920,12 +922,12 @@ export default function App() {
            <ComposeView />
         </div>
       ) : (
-        <PanelGroup direction="horizontal"
-          defaultLayout={panelLayout}
-          onLayoutChanged={(layout) => { try { localStorage.setItem('mailmail-panels-v3', JSON.stringify(layout)); } catch {} }}
+        <PanelGroup orientation="horizontal"
+          defaultLayout={innerLayout}
+          onLayoutChanged={(layout) => { try { localStorage.setItem('mailmail-inner-v2', JSON.stringify(layout)); } catch {} }}
         >
           {/* MIDDLE PANE: MESSAGE LIST */}
-          <Panel id="list" defaultSize={panelLayout?.[0] ?? 30} minSize={25} maxSize={55}>
+          <Panel id="list" defaultSize="30%" minSize="25%" maxSize="55%">
           <div className="h-full flex flex-col bg-[var(--c-panel)] border-r border-[var(--c-border)]">
             {/* Search bar only — folder name + refresh moved to sidebar */}
             <div className="border-b border-[var(--c-border)] px-4 py-2.5 z-10">
@@ -1006,7 +1008,7 @@ export default function App() {
           <PanelResizeHandle className="w-1 bg-transparent hover:bg-[#004f96]/30 transition-colors cursor-col-resize" />
 
           {/* RIGHT PANE: READING VIEW */}
-          <Panel id="reading" defaultSize={panelLayout?.[1] ?? 70} minSize={40}>
+          <Panel id="reading" defaultSize="70%" minSize="40%">
           <div className="h-full flex flex-col bg-[var(--c-panel)]">
             {selectedEmail ? (
               <>
