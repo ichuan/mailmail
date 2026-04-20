@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
 import type { Email } from './store';
-import { X, Lock, PlusCircle, CheckCircle } from 'lucide-react';
+import { X, Lock, CheckCircle } from 'lucide-react';
 import { useI18n } from './i18n';
 import { useToast } from './components/Toast';
 
@@ -78,7 +78,7 @@ export default function AddAccountView() {
 
   return (
     <div className="w-full h-full flex flex-col pt-8 px-12 text-[var(--c-text)]">
-      <div className="flex justify-between items-center mb-10 w-full max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-10 w-full max-w-2xl mx-auto">
         <div>
           <h2 className="text-3xl font-bold tracking-tight mb-2">{t('addAccount.title')}</h2>
           <p className="text-[var(--c-text-muted)] text-sm">{t('addAccount.subtitle')}</p>
@@ -86,19 +86,9 @@ export default function AddAccountView() {
         <button onClick={() => setView('mail')} className="p-2 hover:bg-[var(--c-hover)] rounded-full text-[var(--c-text-muted)] transition-colors"><X size={20} /></button>
       </div>
 
-      <div className="flex-1 w-full max-w-4xl mx-auto">
-        <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl overflow-hidden shadow-sm flex flex-col md:flex-row">
-          <div className="w-full md:w-5/12 bg-[var(--c-bg)] p-10 flex flex-col justify-between items-start border-r border-[var(--c-border)]">
-            <div>
-              <PlusCircle className="text-[#004f96] mb-4" size={32} />
-              <h2 className="text-2xl font-bold tracking-tight text-[var(--c-text)] leading-tight mb-4">{t('addAccount.hero')}</h2>
-              <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">
-                  {t('addAccount.heroDesc')}
-              </p>
-            </div>
-          </div>
-
-          <div className="w-full md:w-7/12 p-8 overflow-y-auto">
+      <div className="flex-1 w-full max-w-2xl mx-auto">
+        <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl overflow-hidden shadow-sm">
+          <div className="p-8 overflow-y-auto">
             <form onSubmit={handleSubmit} className="space-y-4">
               <h3 className="uppercase tracking-widest text-[var(--c-text-muted)] font-bold mb-4 text-xs">{t('addAccount.config')}</h3>
               {errorMsg && <div className="p-3 bg-red-100/50 text-red-800 rounded-md text-sm border border-red-200">{errorMsg}</div>}

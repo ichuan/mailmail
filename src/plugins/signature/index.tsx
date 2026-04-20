@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from '../../store';
 import type { Signature } from '../../store';
 import type { PluginModule, PluginAPI } from '../../core/plugin-api';
+import { useConfirm } from '../../components/AlertDialog';
 
 // ── Compose: signature picker ────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ function SignatureSettings() {
   const [contentInput, setContentInput] = useState('');
   const [isDefault, setIsDefault] = useState(false);
   const [savingError, setSavingError] = useState('');
+  const { confirm } = useConfirm();
 
   const reload = useCallback(async () => {
     try {
@@ -119,7 +121,7 @@ function SignatureSettings() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this signature?')) return;
+    if (!await confirm('Delete this signature?')) return;
     try {
       await invoke('delete_signature', { id });
       await reload();

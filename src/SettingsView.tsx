@@ -6,14 +6,16 @@ import { Slot } from './core/slot-registry';
 import { useI18n } from './i18n';
 import type { Locale } from './i18n';
 import { useToast } from './components/Toast';
+import { useConfirm } from './components/AlertDialog';
 
 export default function SettingsView() {
   const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
   const { t, locale, setLocale } = useI18n();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(t('settings.removeConfirm', { name }))) return;
+    if (!await confirm(t('settings.removeConfirm', { name }))) return;
     try {
       await invoke('delete_account', { id });
       setAccounts(accounts.filter(a => a.id !== id));
@@ -35,7 +37,7 @@ export default function SettingsView() {
   };
 
   const handleShowImagesToggle = async (enabled: boolean) => {
-    if (enabled && !window.confirm(t('mail.showImagesWarning'))) return;
+    if (enabled && !await confirm(t('mail.showImagesWarning'))) return;
     setShowImages(enabled);
     try {
       await invoke('save_setting', { key: 'showImages', value: String(enabled) });

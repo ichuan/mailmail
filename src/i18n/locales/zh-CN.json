@@ -100,5 +100,7 @@
   "toast.accountAdded": "账户添加成功",
   "toast.accountRemoved": "账户已移除",
   "toast.emailDeleted": "邮件已删除",
-  "toast.emailSent": "邮件发送成功"
+  "toast.emailSent": "邮件发送成功",
+  "dialog.cancel": "取消",
+  "dialog.confirm": "确认"
 }

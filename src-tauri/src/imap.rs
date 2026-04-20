@@ -365,7 +365,24 @@ async fn connect_imap(account: &Account) -> Result<async_imap::Session<tokio_nat
     let session = client
         .login(&account.username, &account.password)
         .await
-        .map_err(|(err, _client)| format!("Failed to login: {}", err))?;
+        .map_err(|(err, _client)| {
+            // async_imap formats NO-response errors as:
+            //   no response: code: None, info: Some("<imap-tagged-text>")
+            // Extract just the IMAP response text for a human-readable message.
+            let s = err.to_string();
+            let prefix = "info: Some(\"";
+            let clean = if let Some(idx) = s.find(prefix) {
+                let after = &s[idx + prefix.len()..];
+                if let Some(end) = after.rfind('"') {
+                    after[..end].to_string()
+                } else {
+                    s.clone()
+                }
+            } else {
+                s
+            };
+            format!("Login failed: {}", clean)
+        })?;
 
     Ok(session)
 }
