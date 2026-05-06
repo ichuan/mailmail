@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeEmailHtml, buildIframeSrcDoc } from '../App';
+import { sanitizeEmailHtml, buildIframeSrcDoc, isSafeExternalMailUrl } from '../App';
 
 describe('sanitizeEmailHtml', () => {
   it('returns html unchanged when images are allowed', () => {
@@ -68,5 +68,15 @@ describe('buildIframeSrcDoc', () => {
     const doc = buildIframeSrcDoc('<p>hi</p>', false);
     // The template itself must not inject any scripts
     expect(doc).not.toContain('<script');
+  });
+});
+
+describe('isSafeExternalMailUrl', () => {
+  it('allows only http and https URLs', () => {
+    expect(isSafeExternalMailUrl('https://example.com')).toBe(true);
+    expect(isSafeExternalMailUrl('http://example.com/path')).toBe(true);
+    expect(isSafeExternalMailUrl('file:///C:/Windows/win.ini')).toBe(false);
+    expect(isSafeExternalMailUrl('javascript:alert(1)')).toBe(false);
+    expect(isSafeExternalMailUrl('data:text/html,<b>x</b>')).toBe(false);
   });
 });

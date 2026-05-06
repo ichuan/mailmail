@@ -8,7 +8,7 @@ function makeEmail(overrides: Partial<Email> = {}): Email {
     id: 'e1', uid: 0, sender: 'Alice', senderEmail: 'alice@test.example.com',
     recipient: 'me@test.example.com', subject: 'Hello', preview: 'Hi',
     timestamp: '2026-01-01T00:00:00Z', read: false, folder: 'inbox',
-    accountId: 'acc-1', ...overrides,
+    accountId: 'acc-1', starred: false, hasAttachments: false, ...overrides,
   };
 }
 

@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 import { pluginManager } from '../../core/plugin-manager';
 import { eventBus } from '../../core/event-bus';
 import { slotRegistry } from '../../core/slot-registry';
-import type { PluginManifest, PluginModule, PluginAPI, PluginContext } from '../../core/plugin-api';
+import type { PluginManifest, PluginModule, PluginAPI } from '../../core/plugin-api';
 
 function makeManifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {

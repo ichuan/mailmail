@@ -1,5 +1,5 @@
 import type { Disposable, EventName, EventMap } from './event-bus';
-import type { Email, Account, ComposeState } from '../store';
+import type { Email, Account } from '../store';
 
 /**
  * Permissions that a plugin can request via manifest.json.

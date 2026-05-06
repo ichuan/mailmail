@@ -98,6 +98,15 @@ export function buildIframeSrcDoc(html: string, isDark: boolean): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${html}</body></html>`;
 }
 
+export function isSafeExternalMailUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Renders HTML email content inside a sandboxed iframe.
  *
@@ -108,12 +117,15 @@ export function buildIframeSrcDoc(html: string, isDark: boolean): string {
  *    and routed through tauri-plugin-shell so they open in the system browser.
  *  - Image stripping (tracker prevention) is applied before srcdoc injection.
  */
-function EmailHtmlViewer({ html, isDark, showImages }: { html: string; isDark: boolean; showImages: boolean }) {
+export function EmailHtmlViewer({ html, isDark, showImages }: { html: string; isDark: boolean; showImages: boolean }) {
   const [height, setHeight] = useState(400);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const srcDoc = buildIframeSrcDoc(sanitizeEmailHtml(html, showImages), isDark);
+  const cleanupClickListenerRef = useRef<(() => void) | null>(null);
+  const srcDoc = useMemo(() => buildIframeSrcDoc(sanitizeEmailHtml(html, showImages), isDark), [html, isDark, showImages]);
 
   const handleLoad = useCallback(() => {
+    cleanupClickListenerRef.current?.();
+    cleanupClickListenerRef.current = null;
     const doc = iframeRef.current?.contentDocument;
     if (!doc) return;
     // Auto-size the iframe to its content so no internal scrollbar appears.
@@ -121,13 +133,21 @@ function EmailHtmlViewer({ html, isDark, showImages }: { html: string; isDark: b
     setHeight(contentHeight);
     // Route all link clicks through Tauri shell to open the system browser.
     // This replaces the onClick delegation that worked on the outer div before.
-    doc.addEventListener('click', (e) => {
+    const handleClick = (e: MouseEvent) => {
       const anchor = (e.target as Element)?.closest?.('a');
       if (anchor instanceof HTMLAnchorElement && anchor.href) {
         e.preventDefault();
+        if (!isSafeExternalMailUrl(anchor.href)) return;
         openExternal(anchor.href).catch(console.error);
       }
-    });
+    };
+    doc.addEventListener('click', handleClick);
+    cleanupClickListenerRef.current = () => doc.removeEventListener('click', handleClick);
+  }, []);
+
+  useEffect(() => () => {
+    cleanupClickListenerRef.current?.();
+    cleanupClickListenerRef.current = null;
   }, []);
 
   return (
@@ -309,6 +329,7 @@ export default function App() {
     // When new mail is detected server-side, trigger an inbox re-sync so the
     // user sees fresh messages without manually pressing Refresh.
     // Read store state directly inside the callback to avoid stale closure capture.
+    let disposed = false;
     let unlistenMailNew: (() => void) | undefined;
     listen<void>('mail:new', () => {
       const store = useMailStore.getState();
@@ -328,9 +349,18 @@ export default function App() {
           toast('error', t('mail.bgSyncFailed'));
         })
         .finally(() => useMailStore.getState().setSyncing(false));
-    }).then(fn => { unlistenMailNew = fn; }).catch(console.warn);
+    }).then(fn => {
+      if (disposed) {
+        fn();
+        return;
+      }
+      unlistenMailNew = fn;
+    }).catch(console.warn);
 
-    return () => { unlistenMailNew?.(); };
+    return () => {
+      disposed = true;
+      unlistenMailNew?.();
+    };
   }, []);
 
   // Sync when folder changes

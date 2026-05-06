@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { eventBus } from './core/event-bus';
 
+export const MAX_EMAILS_PER_ACCOUNT_FOLDER = 500;
+export const MAX_PINNED_EMAILS_PER_ACCOUNT_FOLDER = 100;
+
 export interface Email {
   id: string;
   uid: number;
@@ -87,6 +90,49 @@ interface MailStore {
   setSignatures: (sigs: Signature[]) => void;
 }
 
+function emailMemoryKey(email: Email): string {
+  return `${email.accountId}:${email.folder}:${email.uid}`;
+}
+
+function pruneEmailsForMemory(emails: Email[], selectedEmailId: string | null): Email[] {
+  const keepKeys = new Set<string>();
+  const groups = new Map<string, Email[]>();
+
+  for (const email of emails) {
+    const groupKey = `${email.accountId}:${email.folder}`;
+    const group = groups.get(groupKey) ?? [];
+    group.push(email);
+    groups.set(groupKey, group);
+  }
+
+  for (const group of groups.values()) {
+    if (group.length <= MAX_EMAILS_PER_ACCOUNT_FOLDER) {
+      for (const email of group) keepKeys.add(emailMemoryKey(email));
+      continue;
+    }
+
+    const sorted = group
+      .map(email => ({ email, key: emailMemoryKey(email), timestamp: new Date(email.timestamp).getTime() }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+
+    let retainedRegular = 0;
+    let retainedPinned = 0;
+    for (const { email, key } of sorted) {
+      if (retainedRegular < MAX_EMAILS_PER_ACCOUNT_FOLDER) {
+        keepKeys.add(key);
+        retainedRegular += 1;
+        continue;
+      }
+      if (email.id === selectedEmailId || (email.starred && retainedPinned < MAX_PINNED_EMAILS_PER_ACCOUNT_FOLDER)) {
+        keepKeys.add(key);
+        if (email.starred && email.id !== selectedEmailId) retainedPinned += 1;
+      }
+    }
+  }
+
+  return emails.filter(email => keepKeys.has(emailMemoryKey(email)));
+}
+
 export const useMailStore = create<MailStore>((set) => ({
   accounts: [],
   emails: [],
@@ -114,12 +160,14 @@ export const useMailStore = create<MailStore>((set) => ({
       emails: state.emails.map(e => e.id === id ? { ...e, read: true } : e),
     };
   }),
-  addEmails: (newEmails) => set((state) => ({ emails: [...state.emails, ...newEmails] })),
+  addEmails: (newEmails) => set((state) => ({
+    emails: pruneEmailsForMemory([...state.emails, ...newEmails], state.selectedEmailId),
+  })),
   setView: (view) => set({ activeView: view }),
   setAccounts: (accounts) => {
     set({ accounts });
   },
-  setEmails: (emails) => set({ emails }),
+  setEmails: (emails) => set((state) => ({ emails: pruneEmailsForMemory(emails, state.selectedEmailId) })),
   setSyncLimitDays: (days) => set({ syncLimitDays: days }),
   setShowImages: (show) => {
     set({ showImages: show });
@@ -145,7 +193,7 @@ export const useMailStore = create<MailStore>((set) => ({
   mergeEmails: (newEmails) => set((state) => {
     const existing = new Set(state.emails.map(e => `${e.accountId}:${e.folder}:${e.uid}`));
     const unique = newEmails.filter(e => !existing.has(`${e.accountId}:${e.folder}:${e.uid}`));
-    return { emails: [...state.emails, ...unique] };
+    return { emails: pruneEmailsForMemory([...state.emails, ...unique], state.selectedEmailId) };
   }),
   removeEmail: (id) => {
     set((state) => ({

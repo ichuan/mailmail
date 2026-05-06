@@ -20,3 +20,14 @@
 - `[x]` Phase 5: Verification & Polish
   - `[x]` Verified Front-End Vite Build compilation.
   - `[x]` Verified Rust dependency structure.
+- `[x]` Phase 6: Stability & Long-Running Readiness
+  - `[x]` Add IMAP IDLE exponential backoff and connection status events.
+  - `[x]` Enable SQLite WAL, busy timeout, and larger connection pool.
+  - `[x]` Add SMTP timeout and finite transient retry.
+  - `[x]` Add IMAP delete timeouts and attachment size guards.
+  - `[x]` Add frontend listener/timer cleanup and bounded email/toast state.
+  - `[x]` Update tests to cover stability boundaries.
+- `[ ]` Phase 7: Production Validation
+  - `[ ]` Run weak-network and disconnect/reconnect manual tests.
+  - `[ ]` Run large attachment and large mailbox memory checks.
+  - `[ ]` Decide release log privacy policy for account identifiers.

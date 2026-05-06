@@ -37,7 +37,6 @@ function PrintButton({ email }: { email?: { subject: string; sender: string; sen
 }
 
 const printPlugin: PluginModule = {
-  id: 'print',
   activate(api) {
     return api.ui.registerSlot('toolbar:actions', PrintButton as React.ComponentType);
   },

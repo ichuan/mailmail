@@ -36,6 +36,16 @@ interface DraftData {
   accountId: string;
 }
 
+export function persistDraftToStorage(draft: DraftData): boolean {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    return true;
+  } catch (err) {
+    console.warn('Failed to persist compose draft:', err);
+    return false;
+  }
+}
+
 /**
  * Schedule a send with an undo window.
  *
@@ -96,6 +106,17 @@ export default function ComposeView() {
 
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contactBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    if (draftIndicatorTimerRef.current) clearTimeout(draftIndicatorTimerRef.current);
+    if (contactDebounceRef.current) clearTimeout(contactDebounceRef.current);
+    if (contactBlurTimerRef.current) clearTimeout(contactBlurTimerRef.current);
+    undoSendRef.current?.cancel();
+  }, []);
 
   // Auto-save draft to localStorage after 600ms of inactivity — only for fresh composes.
   useEffect(() => {
@@ -103,7 +124,7 @@ export default function ComposeView() {
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     draftTimerRef.current = setTimeout(() => {
       const draft: DraftData = { to, subject, body, accountId: selectedAccountId };
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      if (!persistDraftToStorage(draft)) return;
       setDraftSaved(true);
       if (draftIndicatorTimerRef.current) clearTimeout(draftIndicatorTimerRef.current);
       draftIndicatorTimerRef.current = setTimeout(() => setDraftSaved(false), 2000);
@@ -124,8 +145,10 @@ export default function ComposeView() {
     contactDebounceRef.current = setTimeout(async () => {
       try {
         const results = await invoke<Contact[]>('suggest_contacts', { query: lastToken });
+        if (!mountedRef.current) return;
         setContactSuggestions(results);
       } catch {
+        if (!mountedRef.current) return;
         setContactSuggestions([]);
       }
     }, 150);
@@ -195,11 +218,12 @@ export default function ComposeView() {
         toast('success', t('compose.sendSuccess'));
         closeCompose();
       } catch (err) {
+        if (!mountedRef.current) return;
         const msg = err instanceof Error ? err.message : String(err);
         setErrorMsg(msg);
         toast('error', t('compose.sendFailed', { error: msg }));
       } finally {
-        setSending(false);
+        if (mountedRef.current) setSending(false);
         undoSendRef.current = null;
       }
     };
@@ -286,7 +310,10 @@ export default function ComposeView() {
                 value={to}
                 onChange={e => handleToChange(e.target.value)}
                 onKeyDown={handleToKeyDown}
-                onBlur={() => setTimeout(() => setContactSuggestions([]), 150)}
+                onBlur={() => {
+                  if (contactBlurTimerRef.current) clearTimeout(contactBlurTimerRef.current);
+                  contactBlurTimerRef.current = setTimeout(() => setContactSuggestions([]), 150);
+                }}
                 className="w-full p-2 border border-[var(--c-border)] rounded-md text-sm outline-none focus:border-[#004f96] bg-[var(--c-panel)] text-[var(--c-text)]"
                 placeholder="recipient@example.com"
                 required

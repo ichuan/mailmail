@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildToWithContact } from '../ComposeView';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { buildToWithContact, persistDraftToStorage } from '../ComposeView';
 import type { Contact } from '../ComposeView';
 
 const alice: Contact = { name: 'Alice Smith', email: 'alice@example.com' };
@@ -35,5 +35,30 @@ describe('buildToWithContact', () => {
     const result = buildToWithContact('first@x.example.com, second@x.example.com, typing', alice);
     expect(result.startsWith('first@x.example.com, second@x.example.com,')).toBe(true);
     expect(result).toContain('Alice Smith <alice@example.com>');
+  });
+});
+
+describe('persistDraftToStorage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it('returns true when draft persistence succeeds', () => {
+    const ok = persistDraftToStorage({ to: 'a@example.com', subject: 'Hi', body: 'Body', accountId: 'acc-1' });
+    expect(ok).toBe(true);
+    expect(localStorage.getItem('mailmail:draft')).toContain('a@example.com');
+  });
+
+  it('returns false when localStorage throws', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const ok = persistDraftToStorage({ to: 'a@example.com', subject: 'Hi', body: 'Body', accountId: 'acc-1' });
+
+    expect(ok).toBe(false);
+    expect(warn).toHaveBeenCalled();
   });
 });

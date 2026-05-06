@@ -1,6 +1,7 @@
 use sqlx::{sqlite::{SqliteConnectOptions, SqlitePoolOptions}, SqlitePool, Row};
 use std::str::FromStr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct Db {
@@ -15,10 +16,14 @@ impl Db {
         let conn_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
             .map_err(|e| e.to_string())?
             .create_if_missing(true)
-            .pragma("foreign_keys", "ON");
+            .pragma("foreign_keys", "ON")
+            .pragma("journal_mode", "WAL")
+            .pragma("synchronous", "NORMAL")
+            .pragma("busy_timeout", "5000");
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(10)
+            .acquire_timeout(Duration::from_secs(5))
             .connect_with(conn_opts)
             .await
             .map_err(|e| e.to_string())?;
