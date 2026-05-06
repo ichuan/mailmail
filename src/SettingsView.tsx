@@ -7,6 +7,7 @@ import { useI18n } from './i18n';
 import type { Locale } from './i18n';
 import { useToast } from './components/Toast';
 import { useConfirm } from './components/AlertDialog';
+import { APP_VERSION_DISPLAY } from './version';
 
 export default function SettingsView() {
   const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
@@ -230,7 +231,7 @@ export default function SettingsView() {
         {/* About */}
         <section className="border-t border-[var(--c-border)] pt-6 pb-8 text-center">
           <p className="text-sm font-semibold text-[var(--c-text-mid)]">MailMail</p>
-          <p className="text-xs text-[var(--c-text-muted)] mt-1">{t('settings.version', { version: '0.1.0' })}</p>
+          <p className="text-xs text-[var(--c-text-muted)] mt-1">{t('settings.version', { version: APP_VERSION_DISPLAY })}</p>
           <p className="text-xs text-[var(--c-text-muted)] mt-0.5">{t('settings.copyright', { year: String(new Date().getFullYear()) })}</p>
         </section>
       </div>
