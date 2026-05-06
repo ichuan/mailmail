@@ -25,7 +25,13 @@ This will automatically compile the Rust backend, bind to the Vite React dev ser
 npm run tauri:dev
 ```
 
-### 3. Log Troubleshooting
+### 3. Build a Release Package
+Run the one-command release pipeline. It executes the frontend tests, Rust tests, and Tauri release bundler, then prints the generated artifact paths:
+```powershell
+npm run build:release
+```
+
+### 4. Log Troubleshooting
 If any background errors occur (e.g., IMAP sync failures, SQLite errors, TLS panics), you can view the backend Rust logs in the same terminal window where you ran `npm run tauri:dev`.
 
 Common log hints:
