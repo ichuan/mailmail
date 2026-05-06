@@ -8,8 +8,10 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "build": "tsc -b && vite build",
+    "build:release": "powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1",
     "lint": "eslint .",
     "preview": "vite preview",
+    "release": "npm run build:release",
     "test": "vitest run",
     "test:watch": "vitest"
   },
