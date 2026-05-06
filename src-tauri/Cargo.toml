@@ -23,22 +23,27 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 async-imap = { version = "0.7", default-features = false, features = ["runtime-tokio"] }
 tokio-native-tls = "0.3"
 native-tls = "0.2"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "chrono"] }
-chrono = { version = "0.4", features = ["serde"] }
-lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls"] }
+sqlx = { version = "0.7", default-features = false, features = ["sqlite", "runtime-tokio-native-tls"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-native-tls"] }
 ammonia = "4.0"
 mailparse = "0.14"
-futures = "0.3"
-tokio-rustls = "0.26.4"
-rustls-native-certs = "0.8.3"
+futures = { version = "0.3", default-features = false, features = ["std"] }
 tauri-plugin-shell = "2"
 keyring = { version = "3", features = ["windows-native"] }
 url = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
