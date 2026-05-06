@@ -16,12 +16,43 @@ function Invoke-Step {
     }
 }
 
+function Update-PatchVersion {
+    $package = Get-Content "package.json" -Raw | ConvertFrom-Json
+    if ($package.version -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        throw "Unsupported package version format: $($package.version)"
+    }
+
+    $major = [int]$Matches[1]
+    $minor = [int]$Matches[2]
+    $patch = [int]$Matches[3] + 1
+    $newVersion = "$major.$minor.$patch"
+
+    Invoke-Step "Version bump to $newVersion" {
+        npm version $newVersion --no-git-tag-version | Out-Null
+
+        $tauriConfigPath = "src-tauri\tauri.conf.json"
+        $tauriConfig = Get-Content $tauriConfigPath -Raw
+        $tauriConfig = $tauriConfig -replace '"version"\s*:\s*"[^"]+"', "`"version`": `"$newVersion`""
+        Set-Content -Path $tauriConfigPath -Value $tauriConfig -NoNewline
+
+        $cargoTomlPath = "src-tauri\Cargo.toml"
+        $cargoToml = Get-Content $cargoTomlPath -Raw
+        $cargoToml = $cargoToml -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$newVersion`""
+        Set-Content -Path $cargoTomlPath -Value $cargoToml -NoNewline
+    }
+
+    return $newVersion
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repoRoot
 
 try {
+    $appVersion = Update-PatchVersion
     $tauriConfig = Get-Content "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
-    $appVersion = $tauriConfig.version
+    if ($tauriConfig.version -ne $appVersion) {
+        throw "Tauri version $($tauriConfig.version) does not match package version $appVersion"
+    }
     $buildDate = Get-Date -Format "yyyy-MM-dd"
     $artifactDate = Get-Date -Format "yyyyMMdd"
 
