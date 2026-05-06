@@ -72,6 +72,7 @@ RFC 2047 编码头（Subject/From 等）由 `decode_rfc2047()` 处理，支持 Q
 - 每次同步截断到最新 50 封（内存安全）
 - 启动时先从 SQLite 读取缓存即时渲染，再后台执行 `sync_folder` 刷新最新数据
 - IMAP IDLE：Rust 后台 task 维持长连接，新邮件通过 Tauri `app_handle.emit("mail:new", ...)` 推送前端
+- 长运行稳定性：IDLE 连接失败后指数退避（5s 到 300s），SQLite 使用 WAL + busy timeout，SMTP 发送有 timeout 和有限重试，前端邮件 state 按 account/folder 设置容量边界。
 
 ### 密码安全
 

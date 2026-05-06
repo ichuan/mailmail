@@ -1,4 +1,4 @@
-import { useState, useCallback, createContext, useContext, useRef } from 'react';
+import { useState, useCallback, createContext, useContext, useEffect, useRef } from 'react';
 import { X, CheckCircle, AlertTriangle, Info } from 'lucide-react';
 import { useMailStore } from '../store';
 
@@ -53,22 +53,47 @@ const BG_COLORS: Record<ToastType, string> = {
   info:    'bg-[var(--c-panel)] border-[var(--c-border)]',
 };
 
+const MAX_TOASTS = 5;
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idCounter = useRef(0);
+  const timeoutIdsRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // Read theme from the global Zustand store so we can apply the dark class
   // to the toast container, which is rendered outside the App's dark-class div.
   const theme = useMailStore((s) => s.theme);
 
   const dismiss = useCallback((id: number) => {
+    const timeoutId = timeoutIdsRef.current.get(id);
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutIdsRef.current.delete(id);
     setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const enqueueToast = useCallback((item: ToastItem, durationMs: number) => {
+    setToasts(prev => {
+      const next = [...prev, item];
+      const overflow = next.slice(0, Math.max(0, next.length - MAX_TOASTS));
+      for (const oldToast of overflow) {
+        const timeoutId = timeoutIdsRef.current.get(oldToast.id);
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutIdsRef.current.delete(oldToast.id);
+      }
+      return next.slice(-MAX_TOASTS);
+    });
+    const timeoutId = setTimeout(() => dismiss(item.id), durationMs);
+    timeoutIdsRef.current.set(item.id, timeoutId);
+  }, [dismiss]);
+
+  useEffect(() => () => {
+    for (const timeoutId of timeoutIdsRef.current.values()) clearTimeout(timeoutId);
+    timeoutIdsRef.current.clear();
   }, []);
 
   const toast = useCallback((type: ToastType, message: string, durationMs = 4000) => {
     const id = ++idCounter.current;
-    setToasts(prev => [...prev, { id, type, message }]);
-    setTimeout(() => dismiss(id), durationMs);
-  }, [dismiss]);
+    enqueueToast({ id, type, message }, durationMs);
+  }, [enqueueToast]);
 
   const toastWithAction = useCallback((
     type: ToastType,
@@ -82,9 +107,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       label: action.label,
       onClick: () => { action.onClick(); dismiss(id); },
     };
-    setToasts(prev => [...prev, { id, type, message, action: wrappedAction }]);
-    setTimeout(() => dismiss(id), durationMs);
-  }, [dismiss]);
+    enqueueToast({ id, type, message, action: wrappedAction }, durationMs);
+  }, [dismiss, enqueueToast]);
 
   return (
     <ToastContext value={{ toast, toastWithAction }}>

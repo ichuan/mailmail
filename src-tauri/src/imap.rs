@@ -7,6 +7,64 @@ use std::borrow::Cow;
 use async_imap::extensions::idle::IdleResponse;
 use tauri::Emitter;
 
+const IDLE_INITIAL_RECONNECT_DELAY_SECS: u64 = 5;
+const IDLE_MAX_RECONNECT_DELAY_SECS: u64 = 300;
+const MAX_ATTACHMENT_SIZE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_EMAIL_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
+const IMAP_DELETE_FLAG_TIMEOUT_SECS: u64 = 15;
+const IMAP_EXPUNGE_START_TIMEOUT_SECS: u64 = 30;
+const IMAP_EXPUNGE_ITEM_TIMEOUT_SECS: u64 = 15;
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdleConnectionStatus<'a> {
+    account_id: &'a str,
+    status: &'a str,
+    consecutive_failures: u32,
+    retry_in_seconds: Option<u64>,
+}
+
+fn emit_idle_status(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    email: &str,
+    status: &str,
+    consecutive_failures: u32,
+    retry_in_seconds: Option<u64>,
+) {
+    let payload = IdleConnectionStatus {
+        account_id,
+        status,
+        consecutive_failures,
+        retry_in_seconds,
+    };
+    if let Err(e) = app_handle.emit("mail:connection-status", payload) {
+        log::warn!("IDLE [{}]: failed to emit mail:connection-status - {}", email, e);
+    }
+}
+
+async fn wait_before_idle_reconnect(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    email: &str,
+    reconnect_delay: &mut Duration,
+    consecutive_failures: &mut u32,
+) {
+    *consecutive_failures = consecutive_failures.saturating_add(1);
+    let retry_in_seconds = reconnect_delay.as_secs();
+    emit_idle_status(
+        app_handle,
+        account_id,
+        email,
+        "reconnecting",
+        *consecutive_failures,
+        Some(retry_in_seconds),
+    );
+    tokio::time::sleep(*reconnect_delay).await;
+    let next_delay = reconnect_delay.as_secs().saturating_mul(2).min(IDLE_MAX_RECONNECT_DELAY_SECS);
+    *reconnect_delay = Duration::from_secs(next_delay);
+}
+
 /// Remove all `url(...)` references from a CSS value string.
 /// Prevents CSS-based tracking pixels that could send HTTP requests even without
 /// JavaScript (e.g. `background: url(https://tracker.example/pixel.gif)`).
@@ -255,6 +313,7 @@ fn extract_attachments_recursive<'a>(
     part: &mailparse::ParsedMail<'a>,
     result: &mut Vec<AttachmentWithData>,
     index: &mut usize,
+    total_bytes: &mut usize,
 ) {
     if part.subparts.is_empty() {
         let mimetype = part.ctype.mimetype.to_lowercase();
@@ -273,6 +332,22 @@ fn extract_attachments_recursive<'a>(
 
         if let Ok(data) = part.get_body_raw() {
             if data.is_empty() { return; }
+            if data.len() > MAX_ATTACHMENT_SIZE_BYTES {
+                log::warn!(
+                    "Skipping attachment for {} because it exceeds {} bytes",
+                    email_id,
+                    MAX_ATTACHMENT_SIZE_BYTES
+                );
+                return;
+            }
+            if total_bytes.saturating_add(data.len()) > MAX_EMAIL_ATTACHMENT_BYTES {
+                log::warn!(
+                    "Skipping attachment for {} because total attachments exceed {} bytes",
+                    email_id,
+                    MAX_EMAIL_ATTACHMENT_BYTES
+                );
+                return;
+            }
             let filename = disp.params.get("filename")
                 .or_else(|| part.ctype.params.get("name"))
                 .cloned()
@@ -281,6 +356,7 @@ fn extract_attachments_recursive<'a>(
                     format!("attachment_{}.{}", *index, ext)
                 });
             let size = data.len() as i64;
+            let data_len = data.len();
             let id = format!("{}_att_{}", email_id, *index);
             *index += 1;
             result.push(AttachmentWithData {
@@ -293,10 +369,11 @@ fn extract_attachments_recursive<'a>(
                 },
                 data,
             });
+            *total_bytes += data_len;
         }
     } else {
         for subpart in &part.subparts {
-            extract_attachments_recursive(email_id, subpart, result, index);
+            extract_attachments_recursive(email_id, subpart, result, index, total_bytes);
         }
     }
 }
@@ -524,7 +601,8 @@ pub async fn fetch_folder(account: &Account, folder: &str, days_limit: i64) -> R
             // Extract attachment parts from the MIME tree for this email.
             let email_id = format!("{}_{}_{}", account.id, folder.to_lowercase(), msg.uid.unwrap_or(0));
             let mut att_index = 0usize;
-            extract_attachments_recursive(&email_id, &parsed, &mut all_attachments, &mut att_index);
+            let mut attachment_bytes = 0usize;
+            extract_attachments_recursive(&email_id, &parsed, &mut all_attachments, &mut att_index, &mut attachment_bytes);
             if att_index > 0 {
                 if let Some(last) = emails.last_mut() {
                     last.has_attachments = true;
@@ -569,26 +647,55 @@ pub async fn delete_email_on_server(account: &Account, folder: &str, uid: u32) -
     select_folder(&mut session, folder).await?;
 
     // Flag the UID as \Deleted; wrap in Box::pin so the stream is Unpin
-    let mut flag_stream = Box::pin(
-        session
-            .uid_store(&uid.to_string(), "+FLAGS (\\Deleted)")
-            .await
-            .map_err(|e| format!("UID STORE failed: {}", e))?,
-    );
-    while let Some(result) = flag_stream.next().await {
-        result.map_err(|e| format!("UID STORE error: {}", e))?;
+    let uid_string = uid.to_string();
+    let flag_stream_result = tokio::time::timeout(
+        Duration::from_secs(IMAP_DELETE_FLAG_TIMEOUT_SECS),
+        session.uid_store(&uid_string, "+FLAGS (\\Deleted)"),
+    )
+    .await
+    .map_err(|_| format!("UID STORE timed out after {}s", IMAP_DELETE_FLAG_TIMEOUT_SECS))?
+    .map_err(|e| format!("UID STORE failed: {}", e))?;
+    let mut flag_stream = Box::pin(flag_stream_result);
+    loop {
+        let next_result = tokio::time::timeout(
+            Duration::from_secs(IMAP_DELETE_FLAG_TIMEOUT_SECS),
+            flag_stream.next(),
+        )
+        .await
+        .map_err(|_| format!("UID STORE stream timed out after {}s", IMAP_DELETE_FLAG_TIMEOUT_SECS))?;
+
+        match next_result {
+            Some(result) => {
+                result.map_err(|e| format!("UID STORE error: {}", e))?;
+            }
+            None => break,
+        }
     }
     drop(flag_stream);
 
     // Expunge all \Deleted messages in the selected mailbox
-    let mut expunge_stream = Box::pin(
-        session
-            .expunge()
-            .await
-            .map_err(|e| format!("EXPUNGE failed: {}", e))?,
-    );
-    while let Some(result) = expunge_stream.next().await {
-        result.map_err(|e| format!("EXPUNGE error: {}", e))?;
+    let expunge_stream_result = tokio::time::timeout(
+        Duration::from_secs(IMAP_EXPUNGE_START_TIMEOUT_SECS),
+        session.expunge(),
+    )
+    .await
+    .map_err(|_| format!("EXPUNGE timed out after {}s", IMAP_EXPUNGE_START_TIMEOUT_SECS))?
+    .map_err(|e| format!("EXPUNGE failed: {}", e))?;
+    let mut expunge_stream = Box::pin(expunge_stream_result);
+    loop {
+        let next_result = tokio::time::timeout(
+            Duration::from_secs(IMAP_EXPUNGE_ITEM_TIMEOUT_SECS),
+            expunge_stream.next(),
+        )
+        .await
+        .map_err(|_| format!("EXPUNGE stream timed out after {}s", IMAP_EXPUNGE_ITEM_TIMEOUT_SECS))?;
+
+        match next_result {
+            Some(result) => {
+                result.map_err(|e| format!("EXPUNGE error: {}", e))?;
+            }
+            None => break,
+        }
     }
     drop(expunge_stream);
 
@@ -607,25 +714,47 @@ pub async fn delete_email_on_server(account: &Account, folder: &str, uid: u32) -
 /// to stop it when its account is removed.
 pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
     let email = account.email.clone();
+    let account_id = account.id.clone();
+    let mut reconnect_delay = Duration::from_secs(IDLE_INITIAL_RECONNECT_DELAY_SECS);
+    let mut consecutive_failures = 0u32;
 
     'reconnect: loop {
         // Establish a fresh dedicated IDLE connection.
         let mut session = match connect_imap(&account).await {
             Ok(s) => s,
             Err(e) => {
-                log::warn!("IDLE [{}]: connect failed — {}", email, e);
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                let message = format!("connect failed: {}", e);
+                log::warn!("IDLE [{}]: {}", email, message);
+                wait_before_idle_reconnect(
+                    &app_handle,
+                    &account_id,
+                    &email,
+                    &mut reconnect_delay,
+                    &mut consecutive_failures,
+                ).await;
                 continue 'reconnect;
             }
         };
 
         if let Err(e) = session.select("INBOX").await {
-            log::warn!("IDLE [{}]: SELECT INBOX failed — {}", email, e);
-            tokio::time::sleep(Duration::from_secs(15)).await;
+            let message = format!("SELECT INBOX failed: {}", e);
+            log::warn!("IDLE [{}]: {}", email, message);
+            wait_before_idle_reconnect(
+                &app_handle,
+                &account_id,
+                &email,
+                &mut reconnect_delay,
+                &mut consecutive_failures,
+            ).await;
             continue 'reconnect;
         }
 
         log::info!("IDLE [{}]: watching INBOX", email);
+        if consecutive_failures > 0 {
+            emit_idle_status(&app_handle, &account_id, &email, "connected", 0, None);
+        }
+        reconnect_delay = Duration::from_secs(IDLE_INITIAL_RECONNECT_DELAY_SECS);
+        consecutive_failures = 0;
 
         // Inner loop: IDLE → wait → DONE → repeat.
         // Each cycle waits up to 25 min before re-issuing IDLE (RFC 2177 recommends < 29 min).
@@ -645,7 +774,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             let response = match wait_fut.await {
                 Ok(r) => r,
                 Err(e) => {
-                    log::warn!("IDLE [{}]: wait error — {}", email, e);
+                    log::warn!("IDLE [{}]: wait error - {}", email, e);
                     break 'idle_loop; // handle dropped here, triggers reconnect
                 }
             };
@@ -654,7 +783,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             session = match handle.done().await {
                 Ok(s) => s,
                 Err(e) => {
-                    log::warn!("IDLE [{}]: DONE error — {}", email, e);
+                    log::warn!("IDLE [{}]: DONE error - {}", email, e);
                     break 'idle_loop; // triggers reconnect
                 }
             };
@@ -668,8 +797,13 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             // On Timeout or ManualInterrupt: just loop and re-enter IDLE.
         }
 
-        // Brief back-off before reconnecting after a connection/protocol error.
-        tokio::time::sleep(Duration::from_secs(15)).await;
+        wait_before_idle_reconnect(
+            &app_handle,
+            &account_id,
+            &email,
+            &mut reconnect_delay,
+            &mut consecutive_failures,
+        ).await;
     }
 }
 

@@ -32,6 +32,7 @@ function makeEmail(overrides: Partial<Email> = {}): Email {
     timestamp: new Date().toISOString(),
     read: false,
     starred: false,
+    hasAttachments: false,
     folder: 'inbox',
     accountId: 'acc1',
     ...overrides,
