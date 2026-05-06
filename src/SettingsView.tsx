@@ -17,6 +17,16 @@ interface DataDirInfo {
   isCustom: boolean;
 }
 
+export function displayPath(path: string) {
+  if (path.startsWith('\\\\?\\UNC\\')) {
+    return `\\\\${path.slice('\\\\?\\UNC\\'.length)}`;
+  }
+  if (path.startsWith('\\\\?\\')) {
+    return path.slice('\\\\?\\'.length);
+  }
+  return path;
+}
+
 export default function SettingsView() {
   const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
   const { t, locale, setLocale } = useI18n();
@@ -86,6 +96,15 @@ export default function SettingsView() {
       toast('error', t('settings.dataDirUpdateFailed', { error: String(err) }));
     } finally {
       setDataDirBusy(false);
+    }
+  };
+
+  const handleOpenDataDir = async () => {
+    if (!dataDirInfo?.dataDir) return;
+    try {
+      await invoke('open_data_dir');
+    } catch (err) {
+      toast('error', t('settings.dataDirOpenFailed', { error: String(err) }));
     }
   };
 
@@ -232,6 +251,42 @@ export default function SettingsView() {
            </div>
         </section>
 
+        {/* Mail data directory */}
+        <section>
+          <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase mb-4">{t('settings.dataDirTitle')}</h3>
+          <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl shadow-sm p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="mt-0.5 flex-shrink-0 text-[var(--c-text-mid)]"><FolderOpen size={18} /></div>
+                <div className="min-w-0">
+                  <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">{t('settings.dataDirDesc')}</p>
+                  <p className="text-xs text-[var(--c-text-muted)] mt-2 break-all">{dataDirInfo ? displayPath(dataDirInfo.dataDir) : t('settings.dataDirLoading')}</p>
+                </div>
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!dataDirInfo?.dataDir}
+                  onClick={handleOpenDataDir}
+                  title={t('settings.dataDirOpen')}
+                  aria-label={t('settings.dataDirOpen')}
+                  className="p-2 text-[#004f96] hover:bg-[var(--c-selected)] disabled:opacity-50 rounded-md transition-colors"
+                >
+                  <FolderOpen size={16} />
+                </button>
+                <button
+                  type="button"
+                  disabled={dataDirBusy}
+                  onClick={handleChooseDataDir}
+                  className="text-xs font-semibold text-[#004f96] hover:bg-[var(--c-selected)] disabled:opacity-50 px-3 py-1.5 rounded-full transition-colors"
+                >
+                  {dataDirBusy ? t('settings.dataDirChanging') : t('settings.dataDirChange')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* settings:sections slot — plugins (e.g. Signatures) render here */}
         <Slot id="settings:sections" />
 
@@ -247,25 +302,6 @@ export default function SettingsView() {
                   {t('settings.encryptedDesc')}
                 </p>
               </div>
-            </div>
-            <div className="border-t border-[var(--c-border-subtle)]" />
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="mt-0.5 flex-shrink-0 text-[var(--c-text-mid)]"><FolderOpen size={18} /></div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium mb-1">{t('settings.dataDirTitle')}</p>
-                  <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">{t('settings.dataDirDesc')}</p>
-                  <p className="text-xs text-[var(--c-text-muted)] mt-2 break-all">{dataDirInfo?.dataDir ?? t('settings.dataDirLoading')}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={dataDirBusy}
-                onClick={handleChooseDataDir}
-                className="flex-shrink-0 text-xs font-semibold text-[#004f96] hover:bg-[var(--c-selected)] disabled:opacity-50 px-3 py-1.5 rounded-full transition-colors"
-              >
-                {dataDirBusy ? t('settings.dataDirChanging') : t('settings.dataDirChange')}
-              </button>
             </div>
             <div className="border-t border-[var(--c-border-subtle)]" />
             <div className="flex items-start gap-3">

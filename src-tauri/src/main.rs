@@ -13,6 +13,7 @@ use crate::models::{Account, Attachment, Contact, Email, Signature};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
@@ -388,6 +389,69 @@ async fn get_data_dir(state: State<'_, Arc<AppState>>) -> Result<app_config::Dat
 }
 
 #[tauri::command]
+async fn open_data_dir(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let data_dir = {
+        let guard = state.data_dir.lock().await;
+        get_configured_path(&guard, "Data directory")?
+    };
+
+    if !data_dir.is_dir() {
+        return Err(format!(
+            "Data directory does not exist: {}",
+            data_dir.display()
+        ));
+    }
+
+    tokio::task::spawn_blocking(move || open_path_in_file_manager(data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn open_path_in_file_manager(path: PathBuf) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to open data directory: {}", e))
+}
+
+fn set_window_default_icon(app: &AppHandle, label: &str) {
+    let Some(icon) = app.default_window_icon() else {
+        log::warn!("Default window icon is not available");
+        return;
+    };
+
+    let Some(window) = app.get_webview_window(label) else {
+        log::warn!("Window '{}' is not available for icon update", label);
+        return;
+    };
+
+    if let Err(err) = window.set_icon(icon.clone()) {
+        log::warn!("Failed to set icon for window '{}': {}", label, err);
+    }
+}
+
+#[tauri::command]
 async fn set_data_dir(
     state: State<'_, Arc<AppState>>,
     app_handle: AppHandle,
@@ -625,6 +689,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
         .inner_size(800.0, 600.0)
         .build()
         .map_err(|e| e.to_string())?;
+    set_window_default_icon(&app, "print");
 
     Ok(())
 }
@@ -658,6 +723,7 @@ fn main() {
             get_setting,
             save_setting,
             get_data_dir,
+            open_data_dir,
             set_data_dir,
             mark_email_read,
             toggle_star,
@@ -674,6 +740,7 @@ fn main() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            set_window_default_icon(&handle, "main");
             let app_dir = handle
                 .path()
                 .app_data_dir()

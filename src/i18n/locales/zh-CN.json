@@ -82,6 +82,8 @@
   "settings.dataDirChanging": "迁移中...",
   "settings.dataDirChoose": "选择 MailMail 数据目录",
   "settings.dataDirConfirm": "切换数据目录会关闭当前数据库连接、复制现有缓存并重新连接。迁移期间请不要关闭应用。继续吗？",
+  "settings.dataDirOpen": "打开当前数据目录",
+  "settings.dataDirOpenFailed": "打开数据目录失败：{error}",
   "settings.dataDirUpdated": "数据目录已更新",
   "settings.dataDirUpdateFailed": "数据目录更新失败：{error}",
   "settings.about": "关于",

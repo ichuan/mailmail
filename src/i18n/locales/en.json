@@ -82,6 +82,8 @@
   "settings.dataDirChanging": "Migrating...",
   "settings.dataDirChoose": "Choose MailMail data directory",
   "settings.dataDirConfirm": "Changing the data directory closes the current database connection, copies the existing cache, and reconnects. Do not close the app during migration. Continue?",
+  "settings.dataDirOpen": "Open current data directory",
+  "settings.dataDirOpenFailed": "Failed to open data directory: {error}",
   "settings.dataDirUpdated": "Data directory updated",
   "settings.dataDirUpdateFailed": "Failed to update data directory: {error}",
   "settings.about": "About",

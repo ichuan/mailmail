@@ -1,7 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "mailmail",
-  "version": "0.1.0",
+  "mainBinaryName": "mailmail",
+  "version": "0.1.10",
   "identifier": "com.ichuan.mailmail",
   "build": {
     "frontendDist": "../dist",

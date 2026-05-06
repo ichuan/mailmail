@@ -1,5 +1,4 @@
 use sqlx::{sqlite::{SqliteConnectOptions, SqlitePoolOptions}, SqlitePool, Row};
-use std::str::FromStr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -15,8 +14,7 @@ impl Db {
         std::fs::create_dir_all(&app_dir).unwrap_or_default();
         let db_path = app_dir.join("mailmail.sqlite");
 
-        let conn_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
-            .map_err(|e| e.to_string())?
+        let conn_opts = sqlite_connect_options(db_path)
             .create_if_missing(true)
             .pragma("foreign_keys", "ON")
             .pragma("journal_mode", "WAL")
@@ -604,6 +602,10 @@ impl Db {
     }
 }
 
+fn sqlite_connect_options(db_path: PathBuf) -> SqliteConnectOptions {
+    SqliteConnectOptions::new().filename(db_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,9 +639,7 @@ mod tests {
     async fn create_legacy_database(app_dir: &std::path::Path) {
         std::fs::create_dir_all(app_dir).expect("failed to create legacy app dir");
         let db_path = app_dir.join("mailmail.sqlite");
-        let conn_opts = sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
-            .expect("invalid sqlite url")
-            .create_if_missing(true);
+        let conn_opts = sqlite_connect_options(db_path).create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(conn_opts)
@@ -718,9 +718,7 @@ mod tests {
     async fn create_future_schema_database(app_dir: &std::path::Path) {
         std::fs::create_dir_all(app_dir).expect("failed to create future app dir");
         let db_path = app_dir.join("mailmail.sqlite");
-        let conn_opts = sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
-            .expect("invalid sqlite url")
-            .create_if_missing(true);
+        let conn_opts = sqlite_connect_options(db_path).create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(conn_opts)
@@ -784,6 +782,16 @@ mod tests {
     #[tokio::test]
     async fn test_schema_version_recorded_on_new_database() {
         let (db, _tmp) = setup_db().await;
+
+        assert_eq!(schema_version(&db).await, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn test_init_accepts_canonicalized_data_dir() {
+        let tmp = TempDir::new().expect("failed to create temp dir");
+        let canonical = tmp.path().canonicalize().expect("canonicalize temp dir");
+
+        let db = Db::init(canonical).await.expect("canonical path should open");
 
         assert_eq!(schema_version(&db).await, CURRENT_SCHEMA_VERSION);
     }
