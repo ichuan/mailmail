@@ -35,6 +35,14 @@ impl Db {
         Ok(db)
     }
 
+    pub async fn close(self) {
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&self.pool)
+            .await
+            .ok();
+        self.pool.close().await;
+    }
+
     async fn create_tables(&self) -> Result<(), String> {
         let queries = [
             r#"

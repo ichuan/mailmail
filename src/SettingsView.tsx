@@ -1,7 +1,9 @@
 
+import { useEffect, useState } from 'react';
 import { useMailStore } from './store';
-import { HelpCircle, Bell, Mail, Monitor, Shield, Trash2, KeyRound, Plus, Image, Sun, Moon, Globe } from 'lucide-react';
+import { HelpCircle, Bell, Mail, Monitor, Shield, Trash2, KeyRound, Plus, Image, Sun, Moon, Globe, FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { Slot } from './core/slot-registry';
 import { useI18n } from './i18n';
 import type { Locale } from './i18n';
@@ -9,11 +11,25 @@ import { useToast } from './components/Toast';
 import { useConfirm } from './components/AlertDialog';
 import { APP_VERSION_DISPLAY } from './version';
 
+interface DataDirInfo {
+  dataDir: string;
+  defaultDataDir: string;
+  isCustom: boolean;
+}
+
 export default function SettingsView() {
   const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
   const { t, locale, setLocale } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const [dataDirInfo, setDataDirInfo] = useState<DataDirInfo | null>(null);
+  const [dataDirBusy, setDataDirBusy] = useState(false);
+
+  useEffect(() => {
+    invoke<DataDirInfo>('get_data_dir')
+      .then(setDataDirInfo)
+      .catch(err => console.error('Failed to load data directory:', err));
+  }, []);
 
   const handleDelete = async (id: string, name: string) => {
     if (!await confirm(t('settings.removeConfirm', { name }))) return;
@@ -53,6 +69,23 @@ export default function SettingsView() {
       await invoke('save_setting', { key: 'theme', value: newTheme });
     } catch (e) {
       console.error('Failed to persist theme setting:', e);
+    }
+  };
+
+  const handleChooseDataDir = async () => {
+    setDataDirBusy(true);
+    try {
+      const selected = await open({ directory: true, multiple: false, title: t('settings.dataDirChoose') });
+      if (!selected || Array.isArray(selected)) return;
+      if (!await confirm(t('settings.dataDirConfirm'))) return;
+
+      const nextInfo = await invoke<DataDirInfo>('set_data_dir', { path: selected });
+      setDataDirInfo(nextInfo);
+      toast('success', t('settings.dataDirUpdated'));
+    } catch (err) {
+      toast('error', t('settings.dataDirUpdateFailed', { error: String(err) }));
+    } finally {
+      setDataDirBusy(false);
     }
   };
 
@@ -214,6 +247,25 @@ export default function SettingsView() {
                   {t('settings.encryptedDesc')}
                 </p>
               </div>
+            </div>
+            <div className="border-t border-[var(--c-border-subtle)]" />
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="mt-0.5 flex-shrink-0 text-[var(--c-text-mid)]"><FolderOpen size={18} /></div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium mb-1">{t('settings.dataDirTitle')}</p>
+                  <p className="text-sm text-[var(--c-text-muted)] leading-relaxed">{t('settings.dataDirDesc')}</p>
+                  <p className="text-xs text-[var(--c-text-muted)] mt-2 break-all">{dataDirInfo?.dataDir ?? t('settings.dataDirLoading')}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={dataDirBusy}
+                onClick={handleChooseDataDir}
+                className="flex-shrink-0 text-xs font-semibold text-[#004f96] hover:bg-[var(--c-selected)] disabled:opacity-50 px-3 py-1.5 rounded-full transition-colors"
+              >
+                {dataDirBusy ? t('settings.dataDirChanging') : t('settings.dataDirChange')}
+              </button>
             </div>
             <div className="border-t border-[var(--c-border-subtle)]" />
             <div className="flex items-start gap-3">
