@@ -3,6 +3,8 @@ use std::str::FromStr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 #[derive(Clone)]
 pub struct Db {
     pub pool: SqlitePool,
@@ -101,17 +103,78 @@ impl Db {
             sqlx::query(q).execute(&self.pool).await.map_err(|e| e.to_string())?;
         }
 
-        // Migration: add recipient column to existing databases that predate this field.
+        self.run_schema_migrations().await?;
+
+        Ok(())
+    }
+
+    async fn run_schema_migrations(&self) -> Result<(), String> {
+        self.ensure_schema_migrations_table().await?;
+
+        let current_version = self.current_schema_version().await?;
+        if current_version > CURRENT_SCHEMA_VERSION {
+            return Err(format!(
+                "Database schema version {} is newer than supported version {}",
+                current_version,
+                CURRENT_SCHEMA_VERSION,
+            ));
+        }
+
+        if current_version < 1 {
+            self.apply_legacy_schema_migration().await?;
+            self.record_schema_version(1).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_schema_migrations_table(&self) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    async fn current_schema_version(&self) -> Result<i64, String> {
+        let row = sqlx::query("SELECT MAX(version) AS version FROM schema_migrations")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(row.try_get::<Option<i64>, _>("version").map_err(|e| e.to_string())?.unwrap_or(0))
+    }
+
+    async fn record_schema_version(&self, version: i64) -> Result<(), String> {
+        sqlx::query(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, datetime('now')) \
+             ON CONFLICT(version) DO NOTHING",
+        )
+        .bind(version)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    async fn apply_legacy_schema_migration(&self) -> Result<(), String> {
+        // Add recipient column to existing databases that predate this field.
         let _ = sqlx::query("ALTER TABLE emails ADD COLUMN recipient TEXT DEFAULT ''")
             .execute(&self.pool)
             .await;
 
-        // Migration: add is_starred column for the star feature.
+        // Add is_starred column for the star feature.
         let _ = sqlx::query("ALTER TABLE emails ADD COLUMN is_starred BOOLEAN NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
 
-        // Migration: add has_attachments column for attachment support.
+        // Add has_attachments column for attachment support.
         let _ = sqlx::query("ALTER TABLE emails ADD COLUMN has_attachments BOOLEAN NOT NULL DEFAULT 0")
             .execute(&self.pool)
             .await;
@@ -122,7 +185,7 @@ impl Db {
             .execute(&self.pool)
             .await;
 
-        // Migration: normalize email IDs to the deterministic format used by imap.rs.
+        // Normalize email IDs to the deterministic format used by imap.rs.
         // Before commit f35c189, IDs were random UUIDs regenerated on every IMAP fetch.
         // This caused the selectedEmailId to become orphaned after each background sync.
         // Updating the DB here means the first cache load already returns stable IDs,
@@ -545,6 +608,137 @@ mod tests {
         (db, tmp)
     }
 
+    async fn schema_version(db: &Db) -> i64 {
+        let row = sqlx::query("SELECT MAX(version) AS version FROM schema_migrations")
+            .fetch_one(&db.pool)
+            .await
+            .expect("schema version query failed");
+        row.try_get::<Option<i64>, _>("version").unwrap().unwrap_or(0)
+    }
+
+    async fn email_column_names(db: &Db) -> Vec<String> {
+        let rows = sqlx::query("PRAGMA table_info(emails)")
+            .fetch_all(&db.pool)
+            .await
+            .expect("table info query failed");
+        rows.into_iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect()
+    }
+
+    async fn create_legacy_database(app_dir: &std::path::Path) {
+        std::fs::create_dir_all(app_dir).expect("failed to create legacy app dir");
+        let db_path = app_dir.join("mailmail.sqlite");
+        let conn_opts = sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
+            .expect("invalid sqlite url")
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(conn_opts)
+            .await
+            .expect("failed to create legacy db");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                imap_server TEXT NOT NULL,
+                imap_port INTEGER NOT NULL,
+                smtp_server TEXT NOT NULL,
+                smtp_port INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE emails (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                folder TEXT NOT NULL,
+                uid INTEGER NOT NULL,
+                sender TEXT,
+                sender_email TEXT,
+                subject TEXT,
+                preview TEXT,
+                body_text TEXT,
+                body_html TEXT,
+                timestamp TEXT NOT NULL,
+                is_read BOOLEAN NOT NULL DEFAULT 0,
+                FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE UNIQUE INDEX emails_account_uid_idx ON emails (account_id, folder, uid)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, name, email, imap_server, imap_port, smtp_server, smtp_port, username, password) \
+             VALUES ('acc-1', 'Test User', 'test@example.com', 'imap.example.com', 993, 'smtp.example.com', 465, 'test@example.com', 'secret')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO emails (id, account_id, folder, uid, sender, sender_email, subject, preview, body_text, body_html, timestamp, is_read) \
+             VALUES ('legacy-random-id', 'acc-1', 'inbox', 7, 'sender@example.com', 'sender@example.com', 'Legacy message', 'Preview', 'Body', '<p>Body</p>', '2026-01-01T00:00:00+00:00', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO emails (id, account_id, folder, uid, sender, sender_email, subject, preview, body_text, body_html, timestamp, is_read) \
+             VALUES ('bad-uid-zero', 'acc-1', 'inbox', 0, 'sender@example.com', 'sender@example.com', 'Broken message', 'Preview', 'Body', '<p>Body</p>', '2026-01-01T00:00:00+00:00', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool.close().await;
+    }
+
+    async fn create_future_schema_database(app_dir: &std::path::Path) {
+        std::fs::create_dir_all(app_dir).expect("failed to create future app dir");
+        let db_path = app_dir.join("mailmail.sqlite");
+        let conn_opts = sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
+            .expect("invalid sqlite url")
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(conn_opts)
+            .await
+            .expect("failed to create future db");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO schema_migrations (version) VALUES (?)")
+            .bind(CURRENT_SCHEMA_VERSION + 1)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        pool.close().await;
+    }
+
     fn test_account() -> Account {
         Account {
             id: "acc-1".to_string(),
@@ -577,6 +771,61 @@ mod tests {
             starred: false,
             has_attachments: false,
         }
+    }
+
+    #[tokio::test]
+    async fn test_schema_version_recorded_on_new_database() {
+        let (db, _tmp) = setup_db().await;
+
+        assert_eq!(schema_version(&db).await, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn test_schema_migrations_are_idempotent() {
+        let (db, _tmp) = setup_db().await;
+        db.create_tables().await.expect("repeat migration failed");
+
+        let rows = sqlx::query("SELECT version FROM schema_migrations ORDER BY version")
+            .fetch_all(&db.pool)
+            .await
+            .expect("schema migration rows query failed");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].try_get::<i64, _>("version").unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn test_legacy_database_migrates_with_data_preserved() {
+        let tmp = TempDir::new().expect("failed to create temp dir");
+        create_legacy_database(tmp.path()).await;
+
+        let db = Db::init(tmp.path().to_path_buf()).await.expect("legacy db migration failed");
+
+        assert_eq!(schema_version(&db).await, CURRENT_SCHEMA_VERSION);
+        let columns = email_column_names(&db).await;
+        assert!(columns.contains(&"recipient".to_string()));
+        assert!(columns.contains(&"is_starred".to_string()));
+        assert!(columns.contains(&"has_attachments".to_string()));
+
+        let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
+        assert_eq!(emails.len(), 1);
+        assert_eq!(emails[0].id, "acc-1_inbox_7");
+        assert_eq!(emails[0].recipient, "");
+        assert!(!emails[0].starred);
+        assert!(!emails[0].has_attachments);
+    }
+
+    #[tokio::test]
+    async fn test_newer_schema_version_is_rejected() {
+        let tmp = TempDir::new().expect("failed to create temp dir");
+        create_future_schema_database(tmp.path()).await;
+
+        let err = match Db::init(tmp.path().to_path_buf()).await {
+            Ok(_) => panic!("future schema database should be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("newer than supported"));
     }
 
     #[tokio::test]
