@@ -16,6 +16,34 @@ pub struct Account {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct PublicAccount {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub imap_server: String,
+    pub imap_port: u16,
+    pub smtp_server: String,
+    pub smtp_port: u16,
+    pub username: String,
+}
+
+impl From<&Account> for PublicAccount {
+    fn from(account: &Account) -> Self {
+        Self {
+            id: account.id.clone(),
+            name: account.name.clone(),
+            email: account.email.clone(),
+            imap_server: account.imap_server.clone(),
+            imap_port: account.imap_port,
+            smtp_server: account.smtp_server.clone(),
+            smtp_port: account.smtp_port,
+            username: account.username.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Email {
     pub id: String, // deterministic: "{account_id}_{folder}_{uid}"
     pub account_id: String,

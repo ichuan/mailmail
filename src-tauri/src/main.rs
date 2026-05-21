@@ -9,7 +9,7 @@ mod models;
 mod plugin_host;
 mod smtp;
 
-use crate::models::{Account, Attachment, Contact, Email, Signature};
+use crate::models::{Account, Attachment, Contact, Email, PublicAccount, Signature};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -142,6 +142,12 @@ async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, S
         }
     }
     Ok(accounts)
+}
+
+#[tauri::command]
+async fn get_accounts_public(state: State<'_, Arc<AppState>>) -> Result<Vec<PublicAccount>, String> {
+    let accounts = get_accounts(state).await?;
+    Ok(accounts.iter().map(PublicAccount::from).collect())
 }
 
 #[tauri::command]
@@ -713,6 +719,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             get_accounts,
+            get_accounts_public,
             add_account,
             delete_account,
             test_connection,

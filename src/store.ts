@@ -39,7 +39,6 @@ export interface Account {
   smtpServer: string;
   smtpPort: number;
   username: string;
-  password: string;
 }
 
 export interface ComposeState {

@@ -33,7 +33,7 @@ describe('MailStore', () => {
 
   it('should set and get accounts', () => {
     const accounts = [
-      { id: 'a1', name: 'Test', email: 'test@test.com', imapServer: 'imap.test.com', imapPort: 993, smtpServer: 'smtp.test.com', smtpPort: 465, username: 'test', password: 'pass' },
+      { id: 'a1', name: 'Test', email: 'test@test.com', imapServer: 'imap.test.com', imapPort: 993, smtpServer: 'smtp.test.com', smtpPort: 465, username: 'test' },
     ];
     useMailStore.getState().setAccounts(accounts);
     expect(useMailStore.getState().accounts).toHaveLength(1);

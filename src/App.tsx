@@ -285,7 +285,7 @@ export default function App() {
           setTheme(savedTheme);
         }
 
-        const loadedAccounts = await invoke<Account[]>('get_accounts');
+        const loadedAccounts = await invoke<Account[]>('get_accounts_public');
         setAccounts(loadedAccounts);
 
         if (loadedAccounts.length > 0) {
@@ -1234,4 +1234,3 @@ function SidebarItem({ icon, label, active, onClick, count }: { icon: React.Reac
     </button>
   );
 }
-
