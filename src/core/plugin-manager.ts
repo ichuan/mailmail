@@ -203,8 +203,7 @@ class PluginManagerImpl {
       accounts: {
         list() {
           requirePermission(manifest, 'account:read');
-          // Return accounts without passwords for security
-          return useMailStore.getState().accounts.map(a => ({ ...a, password: '***' }));
+          return useMailStore.getState().accounts;
         },
         getActive() {
           requirePermission(manifest, 'account:read');

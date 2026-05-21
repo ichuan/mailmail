@@ -33,11 +33,31 @@ describe('MailStore', () => {
 
   it('should set and get accounts', () => {
     const accounts = [
-      { id: 'a1', name: 'Test', email: 'test@test.example.com', imapServer: 'imap.test.com', imapPort: 993, smtpServer: 'smtp.test.com', smtpPort: 465, username: 'test', password: 'pass' },
+      { id: 'a1', name: 'Test', email: 'test@test.example.com', imapServer: 'imap.test.com', imapPort: 993, smtpServer: 'smtp.test.com', smtpPort: 465, username: 'test' },
     ];
     useMailStore.getState().setAccounts(accounts);
     expect(useMailStore.getState().accounts).toHaveLength(1);
     expect(useMailStore.getState().accounts[0].email).toBe('test@test.example.com');
+  });
+
+  it('should track and clear account health', () => {
+    useMailStore.getState().setAccounts([
+      { id: 'a1', name: 'Test', email: 'test@test.example.com', imapServer: 'imap.test.com', imapPort: 993, smtpServer: 'smtp.test.com', smtpPort: 465, username: 'test' },
+    ]);
+
+    useMailStore.getState().setAccountHealth({
+      accountId: 'a1',
+      status: 'auth_failed',
+      lastErrorCode: 'auth_failed',
+      lastErrorMessage: 'Login failed',
+      consecutiveFailures: 1,
+      updatedAt: '2026-05-21T00:00:00Z',
+    });
+
+    expect(useMailStore.getState().accountHealthById.a1.status).toBe('auth_failed');
+
+    useMailStore.getState().clearAccountHealth('a1');
+    expect(useMailStore.getState().accountHealthById.a1).toBeUndefined();
   });
 
   it('should set and filter emails by folder', () => {

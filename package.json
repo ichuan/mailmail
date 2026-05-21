@@ -9,6 +9,8 @@
     "tauri:dev": "tauri dev",
     "build": "tsc -b && vite build",
     "build:release": "powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1",
+    "typecheck": "tsc --noEmit",
+    "quality-gate": "bash scripts/quality-gate.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "release": "npm run build:release",

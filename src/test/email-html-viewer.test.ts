@@ -72,9 +72,10 @@ describe('buildIframeSrcDoc', () => {
 });
 
 describe('isSafeExternalMailUrl', () => {
-  it('allows only http and https URLs', () => {
+  it('allows http, https, and mailto URLs', () => {
     expect(isSafeExternalMailUrl('https://example.com')).toBe(true);
     expect(isSafeExternalMailUrl('http://example.com/path')).toBe(true);
+    expect(isSafeExternalMailUrl('mailto:user@example.com')).toBe(true);
     expect(isSafeExternalMailUrl('file:///C:/Windows/win.ini')).toBe(false);
     expect(isSafeExternalMailUrl('javascript:alert(1)')).toBe(false);
     expect(isSafeExternalMailUrl('data:text/html,<b>x</b>')).toBe(false);

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMailStore } from './store';
-import type { Email } from './store';
+import type { Account, Email } from './store';
 import { X, Lock, CheckCircle } from 'lucide-react';
 import { useI18n } from './i18n';
 import { useToast } from './components/Toast';
 
 export default function AddAccountView() {
-  const { setView, accounts, setAccounts, mergeEmails } = useMailStore();
+  const { setView, setAccounts, mergeEmails } = useMailStore();
   const { t } = useI18n();
   const { toast } = useToast();
   const [name, setName] = useState('');
@@ -34,7 +34,6 @@ export default function AddAccountView() {
     username,
     password,
   });
-
   const handleTest = async () => {
     setTesting(true);
     setErrorMsg('');
@@ -58,9 +57,8 @@ export default function AddAccountView() {
       const newAccount = buildAccount();
 
       await invoke('add_account', { account: newAccount });
-
-      // Update accounts in store
-      setAccounts([...accounts, newAccount]);
+      const refreshedAccounts = await invoke<Account[]>('get_accounts_public');
+      setAccounts(refreshedAccounts);
 
       // Fetch initial emails and merge with existing emails from other accounts
       const syncedEmails = await invoke<Email[]>('sync_inbox', { account: newAccount, limitDays: 30 });

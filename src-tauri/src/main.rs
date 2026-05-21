@@ -9,7 +9,7 @@ mod models;
 mod plugin_host;
 mod smtp;
 
-use crate::models::{Account, Attachment, Contact, Email, Signature};
+use crate::models::{Account, Attachment, Contact, Email, EmailQuery, NewSecurityAuditLog, PublicAccount, SecurityAuditLog, Signature};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,10 +32,10 @@ fn get_configured_path(path: &Option<PathBuf>, name: &str) -> Result<PathBuf, St
         .ok_or_else(|| format!("{} is not initialized", name))
 }
 
-/// Replace the "KEYCHAIN" sentinel in an account's password field with the real
-/// password fetched from the OS keychain. No-op if the password is already plain.
+/// Resolve a password from the OS keychain when IPC only carries public account
+/// metadata. Newly submitted account forms may still carry a transient password.
 async fn hydrate_password(account: &mut Account) -> Result<(), String> {
-    if account.password == "KEYCHAIN" {
+    if account.password.is_empty() || account.password == "KEYCHAIN" {
         let id = account.id.clone();
         account.password = tokio::task::spawn_blocking(move || keychain::get_password(&id))
             .await
@@ -100,82 +100,37 @@ fn get_db(db_opt: &Option<db::Db>) -> Result<&db::Db, String> {
 async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, String> {
     let guard = state.db.lock().await;
     let db = get_db(&guard)?;
-    let mut accounts = db.get_accounts().await?;
-    for account in &mut accounts {
-        if account.password == "KEYCHAIN" {
-            // Verify that the keychain entry still exists. If it was stored in a
-            // non-persistent backend (e.g. mock keychain in one build, then wiped),
-            // the entry will be gone. Clear the sentinel so later IMAP operations
-            // fail with a clear "invalid credentials" rather than a cryptic
-            // "No matching entry in secure storage" from every command handler.
-            let id = account.id.clone();
-            let ok = tokio::task::spawn_blocking(move || keychain::get_password(&id))
-                .await
-                .map(|r| r.is_ok())
-                .unwrap_or(false);
-            if !ok {
-                log::warn!(
-                    "Keychain entry missing for {}; clearing sentinel. Re-add the account to restore access.",
-                    account.email
-                );
-                db.set_account_password(&account.id, "").await.ok();
-                account.password = "".to_string();
-            }
-        } else if !account.password.is_empty() {
-            // Plaintext password still in DB — migrate to OS keychain.
-            let id = account.id.clone();
-            let pw = account.password.clone();
-            let id2 = id.clone();
-            let stored = tokio::task::spawn_blocking(move || {
-                keychain::store_password(&id, &pw)?;
-                // Verify the entry is immediately readable; some backends (mock)
-                // accept writes but don't persist across restarts.
-                keychain::get_password(&id2)
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-            if stored.is_ok() {
-                db.set_account_password(&account.id, "KEYCHAIN").await.ok();
-                account.password = "KEYCHAIN".to_string();
-            }
-            // If verify-read failed, leave plaintext in DB — safer than losing it.
-        }
-    }
-    Ok(accounts)
+    db.get_accounts().await
+}
+
+#[tauri::command]
+async fn get_accounts_public(state: State<'_, Arc<AppState>>) -> Result<Vec<PublicAccount>, String> {
+    let accounts = get_accounts(state).await?;
+    Ok(accounts.iter().map(PublicAccount::from).collect())
 }
 
 #[tauri::command]
 async fn add_account(
     state: State<'_, Arc<AppState>>,
     app_handle: AppHandle,
-    mut account: Account,
+    account: Account,
 ) -> Result<(), String> {
-    // Store real password in OS keychain; persist only the sentinel in SQLite.
+    // Store real password in OS keychain; SQLite only stores public metadata.
     // Verify that the keychain is actually persistent by reading back immediately.
     let id = account.id.clone();
     let pw = account.password.clone();
     let id2 = id.clone();
-    let keychain_ok = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         keychain::store_password(&id, &pw)?;
         keychain::get_password(&id2)
     })
     .await
-    .map(|r| r.is_ok())
-    .unwrap_or(false);
-    if keychain_ok {
-        account.password = "KEYCHAIN".to_string();
-    } else {
-        log::warn!(
-            "Keychain unavailable for {}; keeping plaintext password in DB.",
-            account.email
-        );
-    }
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Unable to store account password in OS keychain: {}", e))?;
     {
         let guard = state.db.lock().await;
         get_db(&guard)?.insert_account(&account).await?;
     }
-    // Hydrate the real password before starting the IDLE watcher.
-    hydrate_password(&mut account).await?;
     start_idle_for_account((*state).clone(), account, app_handle).await;
     Ok(())
 }
@@ -316,6 +271,24 @@ async fn search_emails(
     get_db(&guard)?
         .search_emails(&account_id, &folder, &query)
         .await
+}
+
+#[tauri::command]
+async fn query_emails(
+    state: State<'_, Arc<AppState>>,
+    query: EmailQuery,
+) -> Result<Vec<Email>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.query_emails(&query).await
+}
+
+#[tauri::command]
+async fn record_security_audit(
+    state: State<'_, Arc<AppState>>,
+    event: NewSecurityAuditLog,
+) -> Result<SecurityAuditLog, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.insert_security_audit_log(&event).await
 }
 
 #[tauri::command]
@@ -713,6 +686,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             get_accounts,
+            get_accounts_public,
             add_account,
             delete_account,
             test_connection,
@@ -735,6 +709,8 @@ fn main() {
             get_cached_emails,
             delete_email,
             search_emails,
+            query_emails,
+            record_security_audit,
             print_email,
             suggest_contacts,
         ])

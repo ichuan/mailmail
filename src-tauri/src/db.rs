@@ -2,7 +2,7 @@ use sqlx::{sqlite::{SqliteConnectOptions, SqlitePoolOptions}, SqlitePool, Row};
 use std::path::PathBuf;
 use std::time::Duration;
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone)]
 pub struct Db {
@@ -52,8 +52,7 @@ impl Db {
                 imap_port INTEGER NOT NULL,
                 smtp_server TEXT NOT NULL,
                 smtp_port INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                password TEXT NOT NULL
+                username TEXT NOT NULL
             );
             "#,
             r#"
@@ -103,6 +102,18 @@ impl Db {
                 FOREIGN KEY(email_id) REFERENCES emails(id) ON DELETE CASCADE
             );
             "#,
+            r#"
+            CREATE TABLE IF NOT EXISTS security_audit_logs (
+                id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                email_id TEXT,
+                account_id TEXT,
+                target TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            "#,
         ];
 
         for q in queries {
@@ -129,6 +140,16 @@ impl Db {
         if current_version < 1 {
             self.apply_legacy_schema_migration().await?;
             self.record_schema_version(1).await?;
+        }
+
+        if current_version < 2 {
+            self.apply_accounts_password_removal_migration().await?;
+            self.record_schema_version(2).await?;
+        }
+
+        if current_version < 3 {
+            self.apply_security_audit_log_migration().await?;
+            self.record_schema_version(3).await?;
         }
 
         Ok(())
@@ -206,10 +227,50 @@ impl Db {
         Ok(())
     }
 
+    async fn apply_accounts_password_removal_migration(&self) -> Result<(), String> {
+        let has_password_column = sqlx::query("PRAGMA table_info(accounts)")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .any(|row| row.try_get::<String, _>("name").unwrap_or_default() == "password");
+        if !has_password_column {
+            return Ok(());
+        }
+
+        sqlx::query("ALTER TABLE accounts DROP COLUMN password")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    async fn apply_security_audit_log_migration(&self) -> Result<(), String> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS security_audit_logs (
+                id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                email_id TEXT,
+                account_id TEXT,
+                target TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub async fn insert_account(&self, account: &crate::models::Account) -> Result<(), String> {
         let q = r#"
-            INSERT INTO accounts (id, name, email, imap_server, imap_port, smtp_server, smtp_port, username, password)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO accounts (id, name, email, imap_server, imap_port, smtp_server, smtp_port, username)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#;
 
         sqlx::query(q)
@@ -221,7 +282,6 @@ impl Db {
             .bind(&account.smtp_server)
             .bind(&account.smtp_port)
             .bind(&account.username)
-            .bind(&account.password)
             .execute(&self.pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -230,7 +290,7 @@ impl Db {
     }
 
     pub async fn get_accounts(&self) -> Result<Vec<crate::models::Account>, String> {
-        let q = "SELECT id, name, email, imap_server, imap_port, smtp_server, smtp_port, username, password FROM accounts";
+        let q = "SELECT id, name, email, imap_server, imap_port, smtp_server, smtp_port, username FROM accounts";
 
         let rows = sqlx::query(q)
             .fetch_all(&self.pool)
@@ -250,7 +310,7 @@ impl Db {
                 smtp_server: row.try_get("smtp_server").map_err(|e| e.to_string())?,
                 smtp_port: smtp_port as u16,
                 username: row.try_get("username").map_err(|e| e.to_string())?,
-                password: row.try_get("password").map_err(|e| e.to_string())?,
+                password: String::new(),
             });
         }
 
@@ -260,18 +320,6 @@ impl Db {
     pub async fn delete_account(&self, id: &str) -> Result<(), String> {
         let q = "DELETE FROM accounts WHERE id = ?";
         sqlx::query(q)
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    /// Overwrite only the password column for an existing account.
-    /// Used during keychain migration to replace plaintext with the sentinel "KEYCHAIN".
-    pub async fn set_account_password(&self, id: &str, password: &str) -> Result<(), String> {
-        sqlx::query("UPDATE accounts SET password = ? WHERE id = ?")
-            .bind(password)
             .bind(id)
             .execute(&self.pool)
             .await
@@ -440,6 +488,61 @@ impl Db {
         Ok(emails)
     }
 
+    pub async fn query_emails(&self, query: &crate::models::EmailQuery) -> Result<Vec<crate::models::Email>, String> {
+        let limit = query.limit.clamp(1, 200) as i64;
+        let mut sql = String::from(
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE 1 = 1",
+        );
+
+        if !query.account_ids.is_empty() {
+            let placeholders = std::iter::repeat("?")
+                .take(query.account_ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            sql.push_str(" AND account_id IN (");
+            sql.push_str(&placeholders);
+            sql.push(')');
+        }
+
+        if query.folder == "starred" {
+            sql.push_str(" AND is_starred = 1");
+        } else {
+            sql.push_str(" AND folder = ?");
+        }
+
+        let has_search = query.search.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+        if has_search {
+            sql.push_str(" AND (subject LIKE ? OR sender LIKE ? OR sender_email LIKE ? OR recipient LIKE ? OR preview LIKE ? OR body_text LIKE ?)");
+        }
+
+        if query.cursor.is_some() {
+            sql.push_str(" AND (timestamp < ? OR (timestamp = ? AND id < ?))");
+        }
+
+        sql.push_str(" ORDER BY timestamp DESC, id DESC LIMIT ?");
+
+        let mut q = sqlx::query(&sql);
+        for account_id in &query.account_ids {
+            q = q.bind(account_id);
+        }
+        if query.folder != "starred" {
+            q = q.bind(&query.folder);
+        }
+        if let Some(search) = query.search.as_ref().filter(|s| !s.trim().is_empty()) {
+            let pattern = format!("%{}%", search.trim());
+            for _ in 0..6 {
+                q = q.bind(pattern.clone());
+            }
+        }
+        if let Some(cursor) = &query.cursor {
+            q = q.bind(&cursor.timestamp).bind(&cursor.timestamp).bind(&cursor.id);
+        }
+        q = q.bind(limit);
+
+        let rows = q.fetch_all(&self.pool).await.map_err(|e| e.to_string())?;
+        rows.into_iter().map(email_from_row).collect()
+    }
+
     /// Store an attachment's binary data in the DB. Replaces any existing attachment with the same id.
     pub async fn insert_attachment(&self, meta: &crate::models::Attachment, data: &[u8]) -> Result<(), String> {
         sqlx::query(
@@ -491,6 +594,42 @@ impl Db {
             .ok_or_else(|| format!("Attachment '{}' not found", id))?;
         let data: Vec<u8> = row.try_get("data").map_err(|e| e.to_string())?;
         Ok(data)
+    }
+
+    pub async fn insert_security_audit_log(&self, event: &crate::models::NewSecurityAuditLog) -> Result<crate::models::SecurityAuditLog, String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO security_audit_logs (id, event_type, severity, email_id, account_id, target, decision) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&id)
+        .bind(&event.event_type)
+        .bind(&event.severity)
+        .bind(&event.email_id)
+        .bind(&event.account_id)
+        .bind(&event.target)
+        .bind(&event.decision)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let row = sqlx::query(
+            "SELECT id, event_type, severity, email_id, account_id, target, decision, created_at FROM security_audit_logs WHERE id = ?"
+        )
+        .bind(&id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        Ok(crate::models::SecurityAuditLog {
+            id: row.try_get("id").map_err(|e| e.to_string())?,
+            event_type: row.try_get("event_type").map_err(|e| e.to_string())?,
+            severity: row.try_get("severity").map_err(|e| e.to_string())?,
+            email_id: row.try_get("email_id").map_err(|e| e.to_string())?,
+            account_id: row.try_get("account_id").map_err(|e| e.to_string())?,
+            target: row.try_get("target").map_err(|e| e.to_string())?,
+            decision: row.try_get("decision").map_err(|e| e.to_string())?,
+            created_at: row.try_get("created_at").map_err(|e| e.to_string())?,
+        })
     }
 
     pub async fn get_signatures(&self) -> Result<Vec<crate::models::Signature>, String> {
@@ -606,10 +745,30 @@ fn sqlite_connect_options(db_path: PathBuf) -> SqliteConnectOptions {
     SqliteConnectOptions::new().filename(db_path)
 }
 
+fn email_from_row(row: sqlx::sqlite::SqliteRow) -> Result<crate::models::Email, String> {
+    Ok(crate::models::Email {
+        id: row.try_get("id").map_err(|e| e.to_string())?,
+        account_id: row.try_get("account_id").map_err(|e| e.to_string())?,
+        folder: row.try_get("folder").map_err(|e| e.to_string())?,
+        uid: row.try_get::<i32, _>("uid").map_err(|e| e.to_string())? as u32,
+        sender: row.try_get("sender").map_err(|e| e.to_string())?,
+        sender_email: row.try_get("sender_email").map_err(|e| e.to_string())?,
+        recipient: row.try_get("recipient").unwrap_or_default(),
+        subject: row.try_get("subject").map_err(|e| e.to_string())?,
+        preview: row.try_get("preview").map_err(|e| e.to_string())?,
+        body_text: row.try_get("body_text").map_err(|e| e.to_string())?,
+        body_html: row.try_get("body_html").map_err(|e| e.to_string())?,
+        timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
+        read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
+        starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
+        has_attachments: row.try_get::<bool, _>("has_attachments").unwrap_or(false),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Account, Email};
+    use crate::models::{Account, Email, EmailQuery, EmailQueryCursor, NewSecurityAuditLog};
     use tempfile::TempDir;
 
     async fn setup_db() -> (Db, TempDir) {
@@ -631,6 +790,16 @@ mod tests {
             .fetch_all(&db.pool)
             .await
             .expect("table info query failed");
+        rows.into_iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect()
+    }
+
+    async fn account_column_names(db: &Db) -> Vec<String> {
+        let rows = sqlx::query("PRAGMA table_info(accounts)")
+            .fetch_all(&db.pool)
+            .await
+            .expect("account table info query failed");
         rows.into_iter()
             .map(|row| row.try_get::<String, _>("name").unwrap())
             .collect()
@@ -787,6 +956,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_new_database_accounts_table_has_no_password_column() {
+        let (db, _tmp) = setup_db().await;
+
+        let columns = account_column_names(&db).await;
+
+        assert!(!columns.contains(&"password".to_string()));
+    }
+
+    #[tokio::test]
     async fn test_init_accepts_canonicalized_data_dir() {
         let tmp = TempDir::new().expect("failed to create temp dir");
         let canonical = tmp.path().canonicalize().expect("canonicalize temp dir");
@@ -806,8 +984,10 @@ mod tests {
             .await
             .expect("schema migration rows query failed");
 
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].try_get::<i64, _>("version").unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].try_get::<i64, _>("version").unwrap(), 1);
+        assert_eq!(rows[1].try_get::<i64, _>("version").unwrap(), 2);
+        assert_eq!(rows[2].try_get::<i64, _>("version").unwrap(), CURRENT_SCHEMA_VERSION);
     }
 
     #[tokio::test]
@@ -818,6 +998,8 @@ mod tests {
         let db = Db::init(tmp.path().to_path_buf()).await.expect("legacy db migration failed");
 
         assert_eq!(schema_version(&db).await, CURRENT_SCHEMA_VERSION);
+        let account_columns = account_column_names(&db).await;
+        assert!(!account_columns.contains(&"password".to_string()));
         let columns = email_column_names(&db).await;
         assert!(columns.contains(&"recipient".to_string()));
         assert!(columns.contains(&"is_starred".to_string()));
@@ -1013,6 +1195,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_query_emails_filters_searches_and_pages() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+        let mut other_account = test_account();
+        other_account.id = "acc-2".to_string();
+        other_account.email = "other@example.com".to_string();
+        db.insert_account(&other_account).await.unwrap();
+
+        for uid in 1..=3 {
+            let mut email = test_email("acc-1", uid);
+            email.id = format!("acc-1_inbox_{}", uid);
+            email.subject = if uid == 2 { "Quarterly Budget".to_string() } else { format!("Message {}", uid) };
+            email.timestamp = format!("2026-01-0{}T00:00:00+00:00", uid);
+            db.upsert_email(&email).await.unwrap();
+        }
+        let mut other = test_email("acc-2", 1);
+        other.id = "acc-2_inbox_1".to_string();
+        other.subject = "Quarterly Budget".to_string();
+        other.timestamp = "2026-01-04T00:00:00+00:00".to_string();
+        db.upsert_email(&other).await.unwrap();
+
+        let page = db.query_emails(&EmailQuery {
+            account_ids: vec!["acc-1".to_string()],
+            folder: "inbox".to_string(),
+            search: None,
+            cursor: None,
+            limit: 2,
+        }).await.unwrap();
+        assert_eq!(page.iter().map(|email| email.id.as_str()).collect::<Vec<_>>(), vec!["acc-1_inbox_3", "acc-1_inbox_2"]);
+
+        let next_page = db.query_emails(&EmailQuery {
+            account_ids: vec!["acc-1".to_string()],
+            folder: "inbox".to_string(),
+            search: None,
+            cursor: Some(EmailQueryCursor {
+                timestamp: page[1].timestamp.clone(),
+                id: page[1].id.clone(),
+            }),
+            limit: 2,
+        }).await.unwrap();
+        assert_eq!(next_page.iter().map(|email| email.id.as_str()).collect::<Vec<_>>(), vec!["acc-1_inbox_1"]);
+
+        let search = db.query_emails(&EmailQuery {
+            account_ids: vec!["acc-1".to_string()],
+            folder: "inbox".to_string(),
+            search: Some("budget".to_string()),
+            cursor: None,
+            limit: 10,
+        }).await.unwrap();
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].id, "acc-1_inbox_2");
+    }
+
+    #[tokio::test]
     async fn test_toggle_star() {
         let (db, _tmp) = setup_db().await;
         db.insert_account(&test_account()).await.unwrap();
@@ -1054,6 +1290,27 @@ mod tests {
 
         let data = db.get_attachment_data("email-42_att_0").await.unwrap();
         assert_eq!(data, b"fake-pdf-bytes");
+    }
+
+    #[tokio::test]
+    async fn test_insert_security_audit_log() {
+        let (db, _tmp) = setup_db().await;
+
+        let inserted = db.insert_security_audit_log(&NewSecurityAuditLog {
+            event_type: "external_link".to_string(),
+            severity: "medium".to_string(),
+            email_id: Some("email-1".to_string()),
+            account_id: Some("acc-1".to_string()),
+            target: "https://example.com".to_string(),
+            decision: "opened".to_string(),
+        }).await.unwrap();
+
+        assert_eq!(inserted.event_type, "external_link");
+        assert_eq!(inserted.severity, "medium");
+        assert_eq!(inserted.target, "https://example.com");
+        assert_eq!(inserted.decision, "opened");
+        assert!(!inserted.id.is_empty());
+        assert!(!inserted.created_at.is_empty());
     }
 
     #[tokio::test]

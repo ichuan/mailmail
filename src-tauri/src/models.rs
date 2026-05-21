@@ -11,7 +11,36 @@ pub struct Account {
     pub smtp_server: String,
     pub smtp_port: u16,
     pub username: String,
-    pub password: String, // In a real app this should be securely stored in the OS keyring
+    #[serde(default, skip_serializing)]
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicAccount {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub imap_server: String,
+    pub imap_port: u16,
+    pub smtp_server: String,
+    pub smtp_port: u16,
+    pub username: String,
+}
+
+impl From<&Account> for PublicAccount {
+    fn from(account: &Account) -> Self {
+        Self {
+            id: account.id.clone(),
+            name: account.name.clone(),
+            email: account.email.clone(),
+            imap_server: account.imap_server.clone(),
+            imap_port: account.imap_port,
+            smtp_server: account.smtp_server.clone(),
+            smtp_port: account.smtp_port,
+            username: account.username.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -39,12 +68,63 @@ pub struct Email {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct EmailQueryCursor {
+    pub timestamp: String,
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailQuery {
+    #[serde(default)]
+    pub account_ids: Vec<String>,
+    pub folder: String,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<EmailQueryCursor>,
+    #[serde(default = "default_email_query_limit")]
+    pub limit: u32,
+}
+
+fn default_email_query_limit() -> u32 {
+    50
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Attachment {
     pub id: String,
     pub email_id: String,
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityAuditLog {
+    pub id: String,
+    pub event_type: String,
+    pub severity: String,
+    pub email_id: Option<String>,
+    pub account_id: Option<String>,
+    pub target: String,
+    pub decision: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSecurityAuditLog {
+    pub event_type: String,
+    pub severity: String,
+    #[serde(default)]
+    pub email_id: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    pub target: String,
+    pub decision: String,
 }
 
 /// Internal transfer type for carrying raw attachment bytes from imap.rs to main.rs.

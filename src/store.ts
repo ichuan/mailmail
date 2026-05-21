@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { eventBus } from './core/event-bus';
+import type { AppErrorCode } from './core/app-error';
 
 export const MAX_EMAILS_PER_ACCOUNT_FOLDER = 500;
 export const MAX_PINNED_EMAILS_PER_ACCOUNT_FOLDER = 100;
@@ -39,7 +40,26 @@ export interface Account {
   smtpServer: string;
   smtpPort: number;
   username: string;
-  password: string;
+}
+
+export type AccountHealthStatus =
+  | 'unknown'
+  | 'healthy'
+  | 'syncing'
+  | 'degraded'
+  | 'reconnecting'
+  | 'auth_failed'
+  | 'manual_action_required'
+  | 'offline';
+
+export interface AccountHealth {
+  accountId: string;
+  status: AccountHealthStatus;
+  lastErrorCode?: AppErrorCode;
+  lastErrorMessage?: string;
+  consecutiveFailures: number;
+  retryInSeconds?: number;
+  updatedAt: string;
 }
 
 export interface ComposeState {
@@ -59,6 +79,7 @@ export interface Signature {
 
 interface MailStore {
   accounts: Account[];
+  accountHealthById: Record<string, AccountHealth>;
   emails: Email[];
   selectedFolder: string;
   selectedEmailId: string | null;
@@ -75,6 +96,8 @@ interface MailStore {
   addEmails: (emails: Email[]) => void;
   setView: (view: 'mail' | 'settings' | 'add_account' | 'compose') => void;
   setAccounts: (accounts: Account[]) => void;
+  setAccountHealth: (health: AccountHealth) => void;
+  clearAccountHealth: (accountId: string) => void;
   setEmails: (emails: Email[]) => void;
   setSyncLimitDays: (days: number) => void;
   setShowImages: (show: boolean) => void;
@@ -135,6 +158,7 @@ function pruneEmailsForMemory(emails: Email[], selectedEmailId: string | null): 
 
 export const useMailStore = create<MailStore>((set) => ({
   accounts: [],
+  accountHealthById: {},
   emails: [],
   selectedFolder: 'inbox',
   selectedEmailId: null,
@@ -165,7 +189,27 @@ export const useMailStore = create<MailStore>((set) => ({
   })),
   setView: (view) => set({ activeView: view }),
   setAccounts: (accounts) => {
-    set({ accounts });
+    set((state) => {
+      const validIds = new Set(accounts.map(account => account.id));
+      const accountHealthById = Object.fromEntries(
+        Object.entries(state.accountHealthById).filter(([accountId]) => validIds.has(accountId)),
+      );
+      return { accounts, accountHealthById };
+    });
+  },
+  setAccountHealth: (health) => {
+    set((state) => ({
+      accountHealthById: {
+        ...state.accountHealthById,
+        [health.accountId]: health,
+      },
+    }));
+  },
+  clearAccountHealth: (accountId) => {
+    set((state) => {
+      const { [accountId]: _removed, ...accountHealthById } = state.accountHealthById;
+      return { accountHealthById };
+    });
   },
   setEmails: (emails) => set((state) => ({ emails: pruneEmailsForMemory(emails, state.selectedEmailId) })),
   setSyncLimitDays: (days) => set({ syncLimitDays: days }),

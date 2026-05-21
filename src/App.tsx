@@ -44,6 +44,8 @@ import { useI18n } from './i18n';
 import { useToast } from './components/Toast';
 import { useConfirm } from './components/AlertDialog';
 import ShortcutsPanel from './components/ShortcutsPanel';
+import { normalizeAppError } from './core/app-error';
+import { classifyAttachmentRisk } from './core/attachment-risk';
 
 // Special virtual folder key that aggregates all accounts' inboxes.
 export const ALL_INBOXES = '__all__';
@@ -101,7 +103,7 @@ export function buildIframeSrcDoc(html: string, isDark: boolean): string {
 export function isSafeExternalMailUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:';
   } catch {
     return false;
   }
@@ -138,6 +140,17 @@ export function EmailHtmlViewer({ html, isDark, showImages }: { html: string; is
       if (anchor instanceof HTMLAnchorElement && anchor.href) {
         e.preventDefault();
         if (!isSafeExternalMailUrl(anchor.href)) return;
+        const parsed = new URL(anchor.href);
+        const target = parsed.protocol === 'mailto:' ? parsed.pathname : parsed.hostname;
+        if (!window.confirm(`Open external link: ${target}?`)) return;
+        invoke('record_security_audit', {
+          event: {
+            eventType: 'external_link',
+            severity: 'medium',
+            target: anchor.href,
+            decision: 'opened',
+          },
+        }).catch(console.warn);
         openExternal(anchor.href).catch(console.error);
       }
     };
@@ -194,7 +207,22 @@ async function syncAllAccounts(
       });
       results.push(...fetched);
       anySucceeded = true;
+      useMailStore.getState().setAccountHealth({
+        accountId: acc.id,
+        status: 'healthy',
+        consecutiveFailures: 0,
+        updatedAt: new Date().toISOString(),
+      });
     } catch (err) {
+      const appError = normalizeAppError(err);
+      useMailStore.getState().setAccountHealth({
+        accountId: acc.id,
+        status: appError.code === 'auth_failed' || appError.code === 'keychain_unavailable' ? 'manual_action_required' : 'degraded',
+        lastErrorCode: appError.code,
+        lastErrorMessage: appError.message,
+        consecutiveFailures: 1,
+        updatedAt: new Date().toISOString(),
+      });
       console.error(`Failed to sync ${folder} for ${acc.email}:`, err);
     }
   }
@@ -204,6 +232,7 @@ async function syncAllAccounts(
 export default function App() {
   const {
     accounts,
+    accountHealthById,
     emails,
     selectedFolder,
     selectedEmailId,
@@ -285,7 +314,7 @@ export default function App() {
           setTheme(savedTheme);
         }
 
-        const loadedAccounts = await invoke<Account[]>('get_accounts');
+        const loadedAccounts = await invoke<Account[]>('get_accounts_public');
         setAccounts(loadedAccounts);
 
         if (loadedAccounts.length > 0) {
@@ -331,6 +360,7 @@ export default function App() {
     // Read store state directly inside the callback to avoid stale closure capture.
     let disposed = false;
     let unlistenMailNew: (() => void) | undefined;
+    let unlistenConnectionStatus: (() => void) | undefined;
     listen<void>('mail:new', () => {
       const store = useMailStore.getState();
       if (store.syncing || store.accounts.length === 0) return;
@@ -357,9 +387,32 @@ export default function App() {
       unlistenMailNew = fn;
     }).catch(console.warn);
 
+    listen<{
+      accountId: string;
+      status: 'connected' | 'reconnecting';
+      consecutiveFailures: number;
+      retryInSeconds?: number;
+    }>('mail:connection-status', (event) => {
+      const status = event.payload.status === 'connected' ? 'healthy' : 'reconnecting';
+      useMailStore.getState().setAccountHealth({
+        accountId: event.payload.accountId,
+        status,
+        consecutiveFailures: event.payload.consecutiveFailures,
+        retryInSeconds: event.payload.retryInSeconds,
+        updatedAt: new Date().toISOString(),
+      });
+    }).then(fn => {
+      if (disposed) {
+        fn();
+        return;
+      }
+      unlistenConnectionStatus = fn;
+    }).catch(console.warn);
+
     return () => {
       disposed = true;
       unlistenMailNew?.();
+      unlistenConnectionStatus?.();
     };
   }, []);
 
@@ -558,6 +611,50 @@ export default function App() {
     searchDebounceRef.current = setTimeout(() => setSearchQuery(value), 300);
   }, [setSearchQuery]);
 
+  // Per-account folder tree expansion in sidebar
+  const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
+  // When set, restricts the email list to a specific account (used by the per-account folder tree)
+  const [filterAccountId, setFilterAccountId] = useState<string | null>(null);
+
+  const toggleAccountExpand = useCallback((id: string) => {
+    setExpandedAccountIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeView !== 'mail' || accounts.length === 0) return;
+    let cancelled = false;
+    const effectiveFolder = selectedFolder === ALL_INBOXES ? 'inbox' : selectedFolder;
+    const accountIds = filterAccountId ? [filterAccountId] : accounts.map(account => account.id);
+    invoke<Email[]>('query_emails', {
+      query: {
+        accountIds,
+        folder: effectiveFolder,
+        search: searchQuery.trim() || null,
+        cursor: null,
+        limit: 200,
+      },
+    })
+      .then(queryEmails => {
+        if (cancelled) return;
+        const { emails: current } = useMailStore.getState();
+        const queryIds = new Set(queryEmails.map(email => email.id));
+        const retained = current.filter(email => {
+          if (queryIds.has(email.id)) return false;
+          if (selectedFolder === 'starred') return !email.starred;
+          return email.folder !== effectiveFolder;
+        });
+        setEmails([...retained, ...queryEmails]);
+      })
+      .catch(err => console.warn('Failed to query emails:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, accounts, filterAccountId, searchQuery, selectedFolder, setEmails]);
+
   const selectedEmail = emails.find(e => e.id === selectedEmailId);
 
   // Attachments for the currently selected email
@@ -576,20 +673,36 @@ export default function App() {
   }, [selectedEmailId, selectedEmail?.hasAttachments]);
 
   const handleSaveAttachment = useCallback(async (att: Attachment) => {
+    const risk = classifyAttachmentRisk(att);
+    if (risk.level !== 'low') {
+      const proceed = await confirm(`Attachment risk: ${risk.level} (${risk.reason}). Save this file?`);
+      invoke('record_security_audit', {
+        event: {
+          eventType: 'attachment_save',
+          severity: risk.level,
+          emailId: selectedEmail?.id,
+          accountId: selectedEmail?.accountId,
+          target: att.filename,
+          decision: proceed ? 'saved' : 'cancelled',
+        },
+      }).catch(console.warn);
+      if (!proceed) return;
+    }
     setSavingAttId(att.id);
     try {
       const dir = await downloadDir();
       // Join with forward-slash; Rust will handle platform path normalization.
       const destPath = `${dir}/${att.filename}`;
       await invoke('save_attachment', { id: att.id, destPath });
-      // Open the saved file using the shell plugin.
-      openExternal(destPath).catch(console.error);
+      if (risk.level !== 'high') {
+        openExternal(destPath).catch(console.error);
+      }
     } catch (err) {
       console.error('Failed to save attachment:', err);
     } finally {
       setSavingAttId(null);
     }
-  }, []);
+  }, [confirm, selectedEmail?.accountId, selectedEmail?.id]);
 
   // Right-click context menu state
   const [ctxMenu, setCtxMenu] = useState<{
@@ -601,19 +714,6 @@ export default function App() {
   } | null>(null);
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
-
-  // Per-account folder tree expansion in sidebar
-  const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
-  // When set, restricts the email list to a specific account (used by the per-account folder tree)
-  const [filterAccountId, setFilterAccountId] = useState<string | null>(null);
-
-  const toggleAccountExpand = useCallback((id: string) => {
-    setExpandedAccountIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) { next.delete(id); } else { next.add(id); }
-      return next;
-    });
-  }, []);
 
   const displayEmails = emails.filter(e => {
     // For the unified inbox, show all inbox-folder emails regardless of account.
@@ -628,13 +728,7 @@ export default function App() {
     }
     // When a specific account is selected in the sidebar tree, filter to that account only.
     if (filterAccountId && e.accountId !== filterAccountId) return false;
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      e.subject.toLowerCase().includes(q) ||
-      e.sender.toLowerCase().includes(q) ||
-      (e.bodyText ?? '').toLowerCase().includes(q)
-    );
+    return true;
   }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   // Reset scroll position when folder or search changes
   const listScrollRef = useRef<HTMLDivElement>(null);
@@ -867,6 +961,14 @@ export default function App() {
               {accounts.map(acc => {
                 const isExpanded = expandedAccountIds.has(acc.id);
                 const accUnread = emails.filter(em => em.accountId === acc.id && em.folder === 'inbox' && !em.read).length;
+                const health = accountHealthById[acc.id];
+                const healthClass = health?.status === 'healthy'
+                  ? 'bg-emerald-500'
+                  : health?.status === 'reconnecting' || health?.status === 'syncing'
+                    ? 'bg-amber-500'
+                    : health?.status === 'degraded' || health?.status === 'auth_failed' || health?.status === 'manual_action_required'
+                      ? 'bg-red-500'
+                      : 'bg-zinc-300';
                 return (
                   <div key={acc.id}>
                     <button
@@ -890,6 +992,10 @@ export default function App() {
                       />
                       <span className="mr-2 flex-shrink-0 opacity-80"><Mail size={15} /></span>
                       <span className="truncate flex-1 text-xs">{acc.email}</span>
+                      <span
+                        title={health?.lastErrorMessage ?? health?.status ?? 'unknown'}
+                        className={cx('ml-2 h-2 w-2 rounded-full flex-shrink-0', healthClass)}
+                      />
                       {accUnread > 0 && (
                         <span className="ml-2 text-xs bg-[#004f96] text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                           {accUnread}
@@ -1119,6 +1225,9 @@ export default function App() {
                       </div>
                       <div className="flex flex-wrap gap-3">
                         {attachments.map(att => (
+                          (() => {
+                            const risk = classifyAttachmentRisk(att);
+                            return (
                           <div
                             key={att.id}
                             className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--c-bg)] border border-[var(--c-border)] max-w-xs"
@@ -1127,6 +1236,14 @@ export default function App() {
                             <div className="min-w-0 flex-1">
                               <div className="text-sm font-medium truncate" title={att.filename}>{att.filename}</div>
                               <div className="text-xs text-[var(--c-text-muted)]">{formatFileSize(att.size)}</div>
+                              {risk.level !== 'low' && (
+                                <div className={cx(
+                                  'mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                                  risk.level === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
+                                )}>
+                                  {risk.level}
+                                </div>
+                              )}
                             </div>
                             <button
                               onClick={() => handleSaveAttachment(att)}
@@ -1139,6 +1256,8 @@ export default function App() {
                                 : <Download size={14} />}
                             </button>
                           </div>
+                            );
+                          })()
                         ))}
                       </div>
                     </div>
@@ -1234,4 +1353,3 @@ function SidebarItem({ icon, label, active, onClick, count }: { icon: React.Reac
     </button>
   );
 }
-

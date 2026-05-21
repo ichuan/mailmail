@@ -28,7 +28,7 @@ export function displayPath(path: string) {
 }
 
 export default function SettingsView() {
-  const { accounts, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
+  const { accounts, accountHealthById, setAccounts, emails, setEmails, setView, syncLimitDays, setSyncLimitDays, showImages, setShowImages, theme, setTheme } = useMailStore();
   const { t, locale, setLocale } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -146,6 +146,10 @@ export default function SettingsView() {
                     <div className="flex flex-col">
                       <span className="font-semibold">{acc.name}</span>
                       <span className="text-xs text-[var(--c-text-muted)]">{acc.email}</span>
+                      <span className="text-xs text-[var(--c-text-muted)]">
+                        {accountHealthById[acc.id]?.status ?? 'unknown'}
+                        {accountHealthById[acc.id]?.lastErrorMessage ? `: ${accountHealthById[acc.id]?.lastErrorMessage}` : ''}
+                      </span>
                     </div>
                   </div>
                   <button onClick={() => handleDelete(acc.id, acc.name)} className="p-2 hover:bg-[#f3f3f3] rounded-md text-[#717783] hover:text-red-600 transition-colors">
