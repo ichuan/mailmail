@@ -174,14 +174,19 @@ class PluginManagerImpl {
           requirePermission(manifest, 'email:read');
           return useMailStore.getState().emails.filter(e => e.folder === folder);
         },
-        search(query: string) {
+        async search(query: string) {
           requirePermission(manifest, 'email:read');
-          const q = query.toLowerCase();
-          return useMailStore.getState().emails.filter(e =>
-            e.subject.toLowerCase().includes(q) ||
-            e.sender.toLowerCase().includes(q) ||
-            (e.bodyText ?? '').toLowerCase().includes(q)
-          );
+          const state = useMailStore.getState();
+          const folder = state.selectedFolder === '__all__' ? 'inbox' : state.selectedFolder;
+          return invoke('query_emails', {
+            query: {
+              accountIds: state.accounts.map(account => account.id),
+              folder,
+              search: query.trim() || null,
+              cursor: null,
+              limit: 200,
+            },
+          });
         },
         async move(emailId: string, toFolder: string) {
           requirePermission(manifest, 'email:move');

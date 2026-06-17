@@ -91,7 +91,7 @@ export interface PluginAPI {
   emails: {
     getById(id: string): Email | undefined;
     getByFolder(folder: string): Email[];
-    search(query: string): Email[];
+    search(query: string): Promise<Email[]>;
     move(emailId: string, toFolder: string): Promise<void>;
     setMetadata(emailId: string, key: string, value: unknown): Promise<void>;
     getMetadata(emailId: string, key: string): Promise<unknown>;

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +40,117 @@ impl From<&Account> for PublicAccount {
             smtp_port: account.smtp_port,
             username: account.username.clone(),
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppErrorCode {
+    NetworkUnavailable,
+    TlsFailed,
+    AuthFailed,
+    ServerRejected,
+    Timeout,
+    RateLimited,
+    ProtocolError,
+    DbUnavailable,
+    KeychainUnavailable,
+    InvalidInput,
+    PluginRejected,
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppErrorUserAction {
+    Retry,
+    Reauthenticate,
+    CheckSettings,
+    Wait,
+    ContactSupport,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppError {
+    pub code: AppErrorCode,
+    pub message: String,
+    pub retryable: bool,
+    pub user_action: AppErrorUserAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+}
+
+impl AppError {
+    pub fn new(
+        code: AppErrorCode,
+        message: String,
+        retryable: bool,
+        user_action: AppErrorUserAction,
+    ) -> Self {
+        Self {
+            code,
+            message,
+            retryable,
+            user_action,
+            details: None,
+        }
+    }
+
+    pub fn from_message(message: String) -> Self {
+        let lower = message.to_lowercase();
+        if lower.contains("login failed")
+            || lower.contains("auth")
+            || lower.contains("invalid credentials")
+        {
+            return Self::new(
+                AppErrorCode::AuthFailed,
+                message,
+                false,
+                AppErrorUserAction::Reauthenticate,
+            );
+        }
+        if lower.contains("keychain")
+            || lower.contains("secure storage")
+            || lower.contains("credential")
+        {
+            return Self::new(
+                AppErrorCode::KeychainUnavailable,
+                message,
+                false,
+                AppErrorUserAction::Reauthenticate,
+            );
+        }
+        if lower.contains("timeout") || lower.contains("timed out") {
+            return Self::new(
+                AppErrorCode::Timeout,
+                message,
+                true,
+                AppErrorUserAction::Retry,
+            );
+        }
+        if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake") {
+            return Self::new(
+                AppErrorCode::TlsFailed,
+                message,
+                false,
+                AppErrorUserAction::CheckSettings,
+            );
+        }
+        if lower.contains("network") || lower.contains("connection") || lower.contains("tcp") {
+            return Self::new(
+                AppErrorCode::NetworkUnavailable,
+                message,
+                true,
+                AppErrorUserAction::Retry,
+            );
+        }
+        Self::new(
+            AppErrorCode::Unknown,
+            message,
+            false,
+            AppErrorUserAction::ContactSupport,
+        )
     }
 }
 
@@ -244,5 +355,38 @@ mod tests {
         assert_eq!(email.sender_email, "from@test.example.com");
         assert_eq!(email.recipient, "me@test.example.com");
         assert_eq!(email.body_text, Some("text".to_string()));
+    }
+
+    #[test]
+    fn test_app_error_serializes_to_frontend_shape() {
+        let error = AppError::new(
+            AppErrorCode::KeychainUnavailable,
+            "Credential unavailable".to_string(),
+            false,
+            AppErrorUserAction::Reauthenticate,
+        );
+
+        let json = serde_json::to_value(&error).unwrap();
+
+        assert_eq!(json["code"], "keychain_unavailable");
+        assert_eq!(json["message"], "Credential unavailable");
+        assert_eq!(json["retryable"], false);
+        assert_eq!(json["userAction"], "reauthenticate");
+    }
+
+    #[test]
+    fn test_app_error_classifies_legacy_messages() {
+        assert_eq!(
+            AppError::from_message("No matching entry in secure storage".to_string()).code,
+            AppErrorCode::KeychainUnavailable,
+        );
+        assert_eq!(
+            AppError::from_message("TCP connection timed out".to_string()).code,
+            AppErrorCode::Timeout,
+        );
+        assert_eq!(
+            AppError::from_message("Login failed: invalid credentials".to_string()).code,
+            AppErrorCode::AuthFailed,
+        );
     }
 }

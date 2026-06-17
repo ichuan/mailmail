@@ -245,11 +245,7 @@ export default function App() {
     setFolder,
     selectEmail,
     setView,
-    setAccounts,
     setEmails,
-    setSyncLimitDays,
-    setShowImages,
-    setTheme,
     setSyncing,
     openCompose,
     removeEmail,
@@ -259,6 +255,13 @@ export default function App() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
+  const tRef = useRef(t);
+  const toastRef = useRef(toast);
+
+  useEffect(() => {
+    tRef.current = t;
+    toastRef.current = toast;
+  }, [t, toast]);
 
   // Keyboard shortcuts overlay visibility
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -297,25 +300,26 @@ export default function App() {
   useEffect(() => {
     async function loadData() {
       try {
+        const store = useMailStore.getState();
         // Load persisted sync limit
         const savedLimit = await invoke<string | null>('get_setting', { key: 'syncLimitDays' });
         if (savedLimit) {
-          setSyncLimitDays(Number(savedLimit));
+          store.setSyncLimitDays(Number(savedLimit));
         }
 
         // Load persisted showImages preference
         const savedShowImages = await invoke<string | null>('get_setting', { key: 'showImages' });
         if (savedShowImages !== null) {
-          setShowImages(savedShowImages === 'true');
+          store.setShowImages(savedShowImages === 'true');
         }
         // Load persisted theme preference
         const savedTheme = await invoke<string | null>('get_setting', { key: 'theme' });
         if (savedTheme === 'dark' || savedTheme === 'light') {
-          setTheme(savedTheme);
+          store.setTheme(savedTheme);
         }
 
         const loadedAccounts = await invoke<Account[]>('get_accounts_public');
-        setAccounts(loadedAccounts);
+        store.setAccounts(loadedAccounts);
 
         if (loadedAccounts.length > 0) {
           // Step 1: show cached emails immediately (zero-wait)
@@ -329,11 +333,11 @@ export default function App() {
               cachedAll.push(...cached);
             } catch (_) { /* no cache yet, skip */ }
           }
-          if (cachedAll.length > 0) setEmails(cachedAll);
+          if (cachedAll.length > 0) store.setEmails(cachedAll);
 
           // Step 2: sync from IMAP in background to refresh
-          setSyncing(true);
-          const limit = savedLimit ? Number(savedLimit) : syncLimitDays;
+          store.setSyncing(true);
+          const limit = savedLimit ? Number(savedLimit) : useMailStore.getState().syncLimitDays;
           const { emails: freshEmails, allFailed } = await syncAllAccounts(loadedAccounts, limit, 'inbox');
           // Only update when at least one account synced successfully.
           // If allFailed (e.g. keychain miss, network error), keep the cached emails.
@@ -341,15 +345,15 @@ export default function App() {
             const { emails: memEmails } = useMailStore.getState();
             const readIds = new Set(memEmails.filter(e => e.read).map(e => e.id));
             const merged = freshEmails.map(e => readIds.has(e.id) ? { ...e, read: true } : e);
-            setEmails([...memEmails.filter(e => e.folder !== 'inbox'), ...merged]);
+            useMailStore.getState().setEmails([...memEmails.filter(e => e.folder !== 'inbox'), ...merged]);
           } else {
-            toast('error', t('mail.syncFailed'));
+            toastRef.current('error', tRef.current('mail.syncFailed'));
           }
-          setSyncing(false);
+          useMailStore.getState().setSyncing(false);
         }
       } catch (err) {
         console.error("Failed to load data:", err);
-        setSyncing(false);
+        useMailStore.getState().setSyncing(false);
       }
     }
     loadData();
@@ -376,7 +380,7 @@ export default function App() {
         })
         .catch(err => {
           console.error('IDLE-triggered sync failed:', err);
-          toast('error', t('mail.bgSyncFailed'));
+          toastRef.current('error', tRef.current('mail.bgSyncFailed'));
         })
         .finally(() => useMailStore.getState().setSyncing(false));
     }).then(fn => {
@@ -467,7 +471,7 @@ export default function App() {
     }
     syncFolder();
     return () => { cancelled = true; };
-  }, [selectedFolder]);
+  }, [accounts, activeView, selectedFolder, setEmails, setSyncing, syncLimitDays]);
 
   // Show the window after first render.
   // The window starts with visible:false in tauri.conf.json so Vite's
@@ -670,7 +674,7 @@ export default function App() {
     invoke<Attachment[]>('get_attachments', { emailId: selectedEmail.id })
       .then(setAttachments)
       .catch(err => console.warn('Failed to load attachments:', err));
-  }, [selectedEmailId, selectedEmail?.hasAttachments]);
+  }, [selectedEmailId, selectedEmail?.id, selectedEmail?.hasAttachments]);
 
   const handleSaveAttachment = useCallback(async (att: Attachment) => {
     const risk = classifyAttachmentRisk(att);

@@ -9,7 +9,10 @@ mod models;
 mod plugin_host;
 mod smtp;
 
-use crate::models::{Account, Attachment, Contact, Email, EmailQuery, NewSecurityAuditLog, PublicAccount, SecurityAuditLog, Signature};
+use crate::models::{
+    Account, AppError, Attachment, Contact, Email, EmailQuery, NewSecurityAuditLog, PublicAccount,
+    SecurityAuditLog, Signature,
+};
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -104,7 +107,9 @@ async fn get_accounts(state: State<'_, Arc<AppState>>) -> Result<Vec<Account>, S
 }
 
 #[tauri::command]
-async fn get_accounts_public(state: State<'_, Arc<AppState>>) -> Result<Vec<PublicAccount>, String> {
+async fn get_accounts_public(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<PublicAccount>, String> {
     let accounts = get_accounts(state).await?;
     Ok(accounts.iter().map(PublicAccount::from).collect())
 }
@@ -201,10 +206,14 @@ async fn sync_folder(
     mut account: Account,
     folder: String,
     limit_days: i64,
-) -> Result<Vec<Email>, String> {
-    hydrate_password(&mut account).await?;
+) -> Result<Vec<Email>, AppError> {
+    hydrate_password(&mut account)
+        .await
+        .map_err(AppError::from_message)?;
     log::info!("Syncing folder '{}' for account: {}", folder, account.email);
-    let (mut emails, raw_attachments) = imap::fetch_folder(&account, &folder, limit_days).await?;
+    let (mut emails, raw_attachments) = imap::fetch_folder(&account, &folder, limit_days)
+        .await
+        .map_err(AppError::from_message)?;
 
     // Run backend plugin pipeline on fetched emails
     {

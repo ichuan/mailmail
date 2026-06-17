@@ -10,6 +10,8 @@ import { pluginManager } from '../../core/plugin-manager';
 import { eventBus } from '../../core/event-bus';
 import { slotRegistry } from '../../core/slot-registry';
 import type { PluginManifest, PluginModule, PluginAPI } from '../../core/plugin-api';
+import { useMailStore } from '../../store';
+import { invoke } from '@tauri-apps/api/core';
 
 function makeManifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {
@@ -35,6 +37,14 @@ describe('PluginManager', () => {
     pluginManager.destroyAll();
     eventBus.clear();
     slotRegistry.clear();
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(null);
+    useMailStore.setState({
+      accounts: [],
+      emails: [],
+      selectedFolder: 'inbox',
+      searchQuery: '',
+    });
   });
 
   it('should register a plugin', () => {
@@ -217,5 +227,42 @@ describe('PluginManager', () => {
     eventBus.emit('folder:changed', { folder: 'trash' });
     // Should NOT receive after deactivation
     expect(received).toEqual(['sent']);
+  });
+
+  it('should route plugin email search through backend query API', async () => {
+    let api: PluginAPI | null = null;
+    const results = [{ id: 'e1', subject: 'Budget' }];
+    vi.mocked(invoke).mockResolvedValue(results);
+    useMailStore.setState({
+      accounts: [
+        {
+          id: 'acc-1',
+          name: 'Work',
+          email: 'work@example.com',
+          imapServer: 'imap.example.com',
+          imapPort: 993,
+          smtpServer: 'smtp.example.com',
+          smtpPort: 587,
+          username: 'work@example.com',
+        },
+      ],
+      selectedFolder: 'inbox',
+    });
+    const module = makeModule({
+      activate: (receivedApi) => { api = receivedApi; },
+    });
+    pluginManager.register(makeManifest({ permissions: ['email:read'] }), module);
+    pluginManager.activate('test-plugin');
+
+    await expect(api!.emails.search('budget')).resolves.toBe(results);
+    expect(invoke).toHaveBeenCalledWith('query_emails', {
+      query: {
+        accountIds: ['acc-1'],
+        folder: 'inbox',
+        search: 'budget',
+        cursor: null,
+        limit: 200,
+      },
+    });
   });
 });
