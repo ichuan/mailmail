@@ -202,13 +202,13 @@ export default function ComposeView() {
     const capturedTo = to;
     const capturedSubject = subject;
     const capturedBody = body;
-    const capturedAccount = selectedAccount;
+    const capturedAccountId = selectedAccount.id;
     const capturedInReplyTo = composeState?.inReplyTo ?? null;
 
     const actualSend = async () => {
       try {
         await invoke('send_email', {
-          account: capturedAccount,
+          accountId: capturedAccountId,
           to: capturedTo,
           subject: capturedSubject,
           body: capturedBody,

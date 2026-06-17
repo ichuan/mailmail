@@ -7,13 +7,15 @@ mod imap;
 mod keychain;
 mod models;
 mod plugin_host;
+mod privacy;
 mod smtp;
 
 use crate::models::{
-    Account, AppError, Attachment, Contact, Email, EmailQuery, NewSecurityAuditLog, PublicAccount,
-    SecurityAuditLog, Signature,
+    Account, AppError, AppErrorCode, AppErrorUserAction, Attachment, Contact, Email, EmailQuery,
+    NewSecurityAuditLog, PublicAccount, SecurityAuditLog, Signature,
 };
 use crate::plugin_host::{PluginHost, TrackingPixelStripper};
+use crate::privacy::redact_email_like;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -86,7 +88,7 @@ async fn start_idle_for_cached_accounts(state: Arc<AppState>, app_handle: AppHan
 
     for mut account in accounts {
         if let Err(e) = hydrate_password(&mut account).await {
-            log::warn!("Could not hydrate password for {}: {}", account.email, e);
+            log::warn!("Could not hydrate password for {}: {}", redact_email_like(&account.email), e);
             continue;
         }
         start_idle_for_account(state.clone(), account, app_handle.clone()).await;
@@ -97,6 +99,32 @@ fn get_db(db_opt: &Option<db::Db>) -> Result<&db::Db, String> {
     db_opt
         .as_ref()
         .ok_or_else(|| "Database not initialized".to_string())
+}
+
+async fn resolve_saved_account(
+    state: &State<'_, Arc<AppState>>,
+    account_id: &str,
+) -> Result<Account, AppError> {
+    let account = {
+        let guard = state.db.lock().await;
+        get_db(&guard)
+            .map_err(AppError::from_message)?
+            .get_account_by_id(account_id)
+            .await
+            .map_err(AppError::from_message)?
+    };
+    let mut account = account.ok_or_else(|| {
+        AppError::new(
+            AppErrorCode::InvalidInput,
+            format!("Account not found: {}", account_id),
+            false,
+            AppErrorUserAction::CheckSettings,
+        )
+    })?;
+    hydrate_password(&mut account)
+        .await
+        .map_err(AppError::from_message)?;
+    Ok(account)
 }
 
 #[tauri::command]
@@ -171,12 +199,14 @@ async fn test_connection(account: Account) -> Result<String, String> {
 #[tauri::command]
 async fn sync_inbox(
     state: State<'_, Arc<AppState>>,
-    mut account: Account,
+    account_id: String,
     limit_days: i64,
-) -> Result<Vec<Email>, String> {
-    hydrate_password(&mut account).await?;
-    log::info!("Starting sync_inbox for account: {}", account.email);
-    let (mut emails, raw_attachments) = imap::fetch_inbox(&account, limit_days).await?;
+) -> Result<Vec<Email>, AppError> {
+    let account = resolve_saved_account(&state, &account_id).await?;
+    log::info!("Starting sync_inbox for account: {}", redact_email_like(&account.email));
+    let (mut emails, raw_attachments) = imap::fetch_inbox(&account, limit_days)
+        .await
+        .map_err(AppError::from_message)?;
 
     // Run backend plugin pipeline on fetched emails
     {
@@ -203,14 +233,12 @@ async fn sync_inbox(
 #[tauri::command]
 async fn sync_folder(
     state: State<'_, Arc<AppState>>,
-    mut account: Account,
+    account_id: String,
     folder: String,
     limit_days: i64,
 ) -> Result<Vec<Email>, AppError> {
-    hydrate_password(&mut account)
-        .await
-        .map_err(AppError::from_message)?;
-    log::info!("Syncing folder '{}' for account: {}", folder, account.email);
+    let account = resolve_saved_account(&state, &account_id).await?;
+    log::info!("Syncing folder '{}' for account: {}", folder, redact_email_like(&account.email));
     let (mut emails, raw_attachments) = imap::fetch_folder(&account, &folder, limit_days)
         .await
         .map_err(AppError::from_message)?;
@@ -250,23 +278,38 @@ async fn get_cached_emails(
 }
 
 #[tauri::command]
+async fn get_email_body(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Option<Email>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.get_email_by_id(&id).await
+}
+
+#[tauri::command]
 async fn delete_email(
     state: State<'_, Arc<AppState>>,
-    mut account: Account,
+    account_id: String,
     folder: String,
     uid: u32,
     email_id: String,
-) -> Result<(), String> {
-    hydrate_password(&mut account).await?;
+) -> Result<(), AppError> {
+    let account = resolve_saved_account(&state, &account_id).await?;
     log::info!(
         "Deleting UID {} from folder '{}' for account: {}",
         uid,
         folder,
-        account.email
+        redact_email_like(&account.email)
     );
-    imap::delete_email_on_server(&account, &folder, uid).await?;
+    imap::delete_email_on_server(&account, &folder, uid)
+        .await
+        .map_err(AppError::from_message)?;
     let guard = state.db.lock().await;
-    get_db(&guard)?.delete_email(&email_id).await
+    get_db(&guard)
+        .map_err(AppError::from_message)?
+        .delete_email(&email_id)
+        .await
+        .map_err(AppError::from_message)
 }
 
 #[tauri::command]
@@ -301,31 +344,47 @@ async fn record_security_audit(
 }
 
 #[tauri::command]
+async fn list_security_audit_logs(
+    state: State<'_, Arc<AppState>>,
+    limit: i64,
+) -> Result<Vec<SecurityAuditLog>, String> {
+    let guard = state.db.lock().await;
+    get_db(&guard)?.list_security_audit_logs(limit).await
+}
+
+#[tauri::command]
 async fn list_folders(
-    _state: State<'_, Arc<AppState>>,
-    mut account: Account,
-) -> Result<Vec<String>, String> {
-    hydrate_password(&mut account).await?;
-    imap::list_folders(&account).await
+    state: State<'_, Arc<AppState>>,
+    account_id: String,
+) -> Result<Vec<String>, AppError> {
+    let account = resolve_saved_account(&state, &account_id).await?;
+    imap::list_folders(&account)
+        .await
+        .map_err(AppError::from_message)
 }
 
 #[tauri::command]
 async fn send_email(
     state: State<'_, Arc<AppState>>,
-    mut account: Account,
+    account_id: String,
     to: String,
     subject: String,
     body: String,
     in_reply_to: Option<String>,
-) -> Result<(), String> {
-    hydrate_password(&mut account).await?;
-    log::info!("Sending email from {} to {}", account.email, to);
+) -> Result<(), AppError> {
+    let account = resolve_saved_account(&state, &account_id).await?;
+    log::info!(
+        "Sending email from {} to {}",
+        redact_email_like(&account.email),
+        redact_email_like(&to)
+    );
 
     // Run backend plugin pipeline before sending
     let mut processed_body = body;
     {
         let host = state.plugin_host.lock().await;
-        host.run_on_email_before_send(&to, &subject, &mut processed_body)?;
+        host.run_on_email_before_send(&to, &subject, &mut processed_body)
+            .map_err(AppError::from_message)?;
     }
 
     smtp::send_email(
@@ -336,6 +395,7 @@ async fn send_email(
         in_reply_to.as_deref(),
     )
     .await
+    .map_err(AppError::from_message)
 }
 
 #[tauri::command]
@@ -716,10 +776,12 @@ fn main() {
             get_attachments,
             save_attachment,
             get_cached_emails,
+            get_email_body,
             delete_email,
             search_emails,
             query_emails,
             record_security_audit,
+            list_security_audit_logs,
             print_email,
             suggest_contacts,
         ])

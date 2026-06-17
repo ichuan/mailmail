@@ -71,6 +71,8 @@
   "settings.language": "Language",
   "settings.languageDesc": "Choose your preferred display language.",
   "settings.securityStorage": "Security & Storage",
+  "settings.securityAudit": "Security Audit",
+  "settings.securityAuditEmpty": "No security events recorded yet.",
   "settings.encryptedTitle": "Encrypted in transit",
   "settings.encryptedDesc": "All connections to your mail server use TLS/SSL. Credentials and email data travel over an encrypted channel directly between this app and your server — no proxy or intermediary involved.",
   "settings.localTitle": "Stored locally only",

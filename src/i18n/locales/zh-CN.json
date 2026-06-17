@@ -71,6 +71,8 @@
   "settings.language": "语言",
   "settings.languageDesc": "选择界面显示语言。",
   "settings.securityStorage": "安全与存储",
+  "settings.securityAudit": "安全审计",
+  "settings.securityAuditEmpty": "暂无安全事件记录。",
   "settings.encryptedTitle": "传输加密",
   "settings.encryptedDesc": "所有与邮件服务器的连接均使用 TLS/SSL 加密。凭据和邮件数据通过加密通道直接在本应用和你的服务器之间传输，不经过任何代理或中间方。",
   "settings.localTitle": "仅本地存储",

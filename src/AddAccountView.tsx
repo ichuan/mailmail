@@ -61,7 +61,7 @@ export default function AddAccountView() {
       setAccounts(refreshedAccounts);
 
       // Fetch initial emails and merge with existing emails from other accounts
-      const syncedEmails = await invoke<Email[]>('sync_inbox', { account: newAccount, limitDays: 30 });
+      const syncedEmails = await invoke<Email[]>('sync_inbox', { accountId: newAccount.id, limitDays: 30 });
       mergeEmails(syncedEmails);
 
       toast('success', t('toast.accountAdded'));

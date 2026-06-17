@@ -1,4 +1,5 @@
 use crate::models::{Account, Email, AttachmentWithData, Attachment};
+use crate::privacy::redact_email_like;
 use mailparse::parse_mail;
 use ammonia;
 use futures::StreamExt;
@@ -39,7 +40,7 @@ fn emit_idle_status(
         retry_in_seconds,
     };
     if let Err(e) = app_handle.emit("mail:connection-status", payload) {
-        log::warn!("IDLE [{}]: failed to emit mail:connection-status - {}", email, e);
+        log::warn!("IDLE [{}]: failed to emit mail:connection-status - {}", redact_email_like(email), e);
     }
 }
 
@@ -714,6 +715,7 @@ pub async fn delete_email_on_server(account: &Account, folder: &str, uid: u32) -
 /// to stop it when its account is removed.
 pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
     let email = account.email.clone();
+    let log_email = redact_email_like(&email);
     let account_id = account.id.clone();
     let mut reconnect_delay = Duration::from_secs(IDLE_INITIAL_RECONNECT_DELAY_SECS);
     let mut consecutive_failures = 0u32;
@@ -724,7 +726,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             Ok(s) => s,
             Err(e) => {
                 let message = format!("connect failed: {}", e);
-                log::warn!("IDLE [{}]: {}", email, message);
+                log::warn!("IDLE [{}]: {}", log_email, message);
                 wait_before_idle_reconnect(
                     &app_handle,
                     &account_id,
@@ -738,7 +740,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
 
         if let Err(e) = session.select("INBOX").await {
             let message = format!("SELECT INBOX failed: {}", e);
-            log::warn!("IDLE [{}]: {}", email, message);
+                log::warn!("IDLE [{}]: {}", log_email, message);
             wait_before_idle_reconnect(
                 &app_handle,
                 &account_id,
@@ -749,7 +751,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             continue 'reconnect;
         }
 
-        log::info!("IDLE [{}]: watching INBOX", email);
+        log::info!("IDLE [{}]: watching INBOX", log_email);
         if consecutive_failures > 0 {
             emit_idle_status(&app_handle, &account_id, &email, "connected", 0, None);
         }
@@ -763,7 +765,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             let mut handle = session.idle();
 
             if let Err(e) = handle.init().await {
-                log::warn!("IDLE [{}]: IDLE init failed — {}", email, e);
+                log::warn!("IDLE [{}]: IDLE init failed — {}", log_email, e);
                 // Handle (and the session inside it) will be dropped here.
                 break 'idle_loop; // triggers reconnect
             }
@@ -774,7 +776,7 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             let response = match wait_fut.await {
                 Ok(r) => r,
                 Err(e) => {
-                    log::warn!("IDLE [{}]: wait error - {}", email, e);
+                    log::warn!("IDLE [{}]: wait error - {}", log_email, e);
                     break 'idle_loop; // handle dropped here, triggers reconnect
                 }
             };
@@ -783,15 +785,15 @@ pub async fn idle_watcher(account: Account, app_handle: tauri::AppHandle) {
             session = match handle.done().await {
                 Ok(s) => s,
                 Err(e) => {
-                    log::warn!("IDLE [{}]: DONE error - {}", email, e);
+                    log::warn!("IDLE [{}]: DONE error - {}", log_email, e);
                     break 'idle_loop; // triggers reconnect
                 }
             };
 
             if matches!(response, IdleResponse::NewData(_)) {
-                log::info!("IDLE [{}]: new mail detected", email);
+                log::info!("IDLE [{}]: new mail detected", log_email);
                 if let Err(e) = app_handle.emit("mail:new", ()) {
-                    log::warn!("IDLE [{}]: failed to emit mail:new — {}", email, e);
+                    log::warn!("IDLE [{}]: failed to emit mail:new — {}", log_email, e);
                 }
             }
             // On Timeout or ManualInterrupt: just loop and re-enter IDLE.
@@ -899,4 +901,3 @@ mod tests {
         assert_eq!(email, "jane@example.com");
     }
 }
-

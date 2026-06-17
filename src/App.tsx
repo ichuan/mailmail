@@ -201,7 +201,7 @@ async function syncAllAccounts(
   for (const acc of accounts) {
     try {
       const fetched = await invoke<Email[]>('sync_folder', {
-        account: acc,
+        accountId: acc.id,
         folder,
         limitDays: syncLimitDays,
       });
@@ -223,7 +223,7 @@ async function syncAllAccounts(
         consecutiveFailures: 1,
         updatedAt: new Date().toISOString(),
       });
-      console.error(`Failed to sync ${folder} for ${acc.email}:`, err);
+      console.error(`Failed to sync ${folder} for account ${acc.id}:`, err);
     }
   }
   return { emails: results, allFailed: accounts.length > 0 && !anySucceeded };
@@ -257,6 +257,7 @@ export default function App() {
   const { confirm } = useConfirm();
   const tRef = useRef(t);
   const toastRef = useRef(toast);
+  const bodyLoadAttemptedRef = useRef(new Set<string>());
 
   useEffect(() => {
     tRef.current = t;
@@ -576,16 +577,11 @@ export default function App() {
   const handleDeleteEmail = useCallback(async (email: Email) => {
     if (!await confirm(t('mail.deleteConfirm', { subject: email.subject }))) return;
 
-    const account = accounts.find(a => a.id === email.accountId);
-    if (!account) {
-      toast('error', t('mail.accountNotFound'));
-      return;
-    }
     // Optimistically remove from UI so the interaction feels immediate.
     removeEmail(email.id);
     try {
       await invoke('delete_email', {
-        account,
+        accountId: email.accountId,
         folder: email.folder,
         uid: email.uid,
         emailId: email.id,
@@ -597,7 +593,7 @@ export default function App() {
       toast('error', t('mail.deleteFailed', { error: String(err) }));
       console.error('Failed to delete email:', err);
     }
-  }, [accounts, removeEmail, t, toast, confirm]);
+  }, [removeEmail, t, toast, confirm]);
 
   // Persist read state to DB so it survives folder switches and app restarts.
   // selectEmail() only updates in-memory; this call syncs the DB.
@@ -660,6 +656,35 @@ export default function App() {
   }, [activeView, accounts, filterAccountId, searchQuery, selectedFolder, setEmails]);
 
   const selectedEmail = emails.find(e => e.id === selectedEmailId);
+
+  useEffect(() => {
+    if (!selectedEmail) return;
+    if (selectedEmail.bodyHtml != null || selectedEmail.bodyText != null) return;
+    if (bodyLoadAttemptedRef.current.has(selectedEmail.id)) return;
+
+    bodyLoadAttemptedRef.current.add(selectedEmail.id);
+    let cancelled = false;
+    invoke<Email | null>('get_email_body', { id: selectedEmail.id })
+      .then(emailWithBody => {
+        if (cancelled || !emailWithBody) return;
+        const { emails: current } = useMailStore.getState();
+        setEmails(current.map(email => email.id === emailWithBody.id
+          ? {
+              ...email,
+              bodyHtml: emailWithBody.bodyHtml ?? undefined,
+              bodyText: emailWithBody.bodyText ?? undefined,
+            }
+          : email
+        ));
+      })
+      .catch(err => {
+        bodyLoadAttemptedRef.current.delete(selectedEmail.id);
+        console.warn('Failed to load email body:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEmail, setEmails]);
 
   // Attachments for the currently selected email
   const [attachments, setAttachments] = useState<Attachment[]>([]);

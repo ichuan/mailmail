@@ -17,6 +17,15 @@ interface DataDirInfo {
   isCustom: boolean;
 }
 
+interface SecurityAuditLog {
+  id: string;
+  eventType: string;
+  severity: string;
+  target: string;
+  decision: string;
+  createdAt: string;
+}
+
 export function displayPath(path: string) {
   if (path.startsWith('\\\\?\\UNC\\')) {
     return `\\\\${path.slice('\\\\?\\UNC\\'.length)}`;
@@ -34,11 +43,15 @@ export default function SettingsView() {
   const { confirm } = useConfirm();
   const [dataDirInfo, setDataDirInfo] = useState<DataDirInfo | null>(null);
   const [dataDirBusy, setDataDirBusy] = useState(false);
+  const [securityAuditLogs, setSecurityAuditLogs] = useState<SecurityAuditLog[]>([]);
 
   useEffect(() => {
     invoke<DataDirInfo>('get_data_dir')
       .then(setDataDirInfo)
       .catch(err => console.error('Failed to load data directory:', err));
+    invoke<SecurityAuditLog[]>('list_security_audit_logs', { limit: 10 })
+      .then(setSecurityAuditLogs)
+      .catch(err => console.error('Failed to load security audit logs:', err));
   }, []);
 
   const handleDelete = async (id: string, name: string) => {
@@ -293,6 +306,40 @@ export default function SettingsView() {
 
         {/* settings:sections slot — plugins (e.g. Signatures) render here */}
         <Slot id="settings:sections" />
+
+        {/* Security audit log */}
+        <section>
+          <h3 className="text-xs font-bold tracking-wider text-[var(--c-text-muted)] uppercase mb-4">{t('settings.securityAudit')}</h3>
+          <div className="bg-[var(--c-panel)] border border-[var(--c-border)] rounded-xl shadow-sm overflow-hidden">
+            {securityAuditLogs.length === 0 ? (
+              <div className="p-5 text-sm text-[var(--c-text-muted)]">{t('settings.securityAuditEmpty')}</div>
+            ) : (
+              securityAuditLogs.map((log, i) => (
+                <div key={log.id} className={`p-4 flex items-start justify-between gap-4 ${i !== securityAuditLogs.length - 1 ? 'border-b border-[var(--c-border-subtle)]' : ''}`}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{log.eventType}</span>
+                      <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full ${
+                        log.severity === 'high'
+                          ? 'bg-red-100 text-red-700'
+                          : log.severity === 'medium'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-[var(--c-bg)] text-[var(--c-text-muted)]'
+                      }`}>
+                        {log.severity}
+                      </span>
+                    </div>
+                    <div className="text-xs text-[var(--c-text-muted)] mt-1 truncate">{log.target}</div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-xs font-medium">{log.decision}</div>
+                    <div className="text-[11px] text-[var(--c-text-muted)] mt-1">{new Date(log.createdAt).toLocaleString()}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
 
         {/* Security & Storage info card */}
         <section>

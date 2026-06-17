@@ -1,8 +1,11 @@
-use sqlx::{sqlite::{SqliteConnectOptions, SqlitePoolOptions}, SqlitePool, Row};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow},
+    Row, SqlitePool,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 #[derive(Clone)]
 pub struct Db {
@@ -152,6 +155,11 @@ impl Db {
             self.record_schema_version(3).await?;
         }
 
+        if current_version < 4 {
+            self.apply_email_query_indexes_migration().await?;
+            self.record_schema_version(4).await?;
+        }
+
         Ok(())
     }
 
@@ -267,6 +275,21 @@ impl Db {
         Ok(())
     }
 
+    async fn apply_email_query_indexes_migration(&self) -> Result<(), String> {
+        let queries = [
+            "CREATE INDEX IF NOT EXISTS emails_account_folder_timestamp_idx ON emails (account_id, folder, timestamp DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS emails_starred_timestamp_idx ON emails (is_starred, timestamp DESC, id DESC)",
+        ];
+
+        for q in queries {
+            sqlx::query(q)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     pub async fn insert_account(&self, account: &crate::models::Account) -> Result<(), String> {
         let q = r#"
             INSERT INTO accounts (id, name, email, imap_server, imap_port, smtp_server, smtp_port, username)
@@ -299,22 +322,22 @@ impl Db {
 
         let mut accounts = Vec::new();
         for row in rows {
-            let imap_port: i32 = row.try_get("imap_port").map_err(|e| e.to_string())?;
-            let smtp_port: i32 = row.try_get("smtp_port").map_err(|e| e.to_string())?;
-            accounts.push(crate::models::Account {
-                id: row.try_get("id").map_err(|e| e.to_string())?,
-                name: row.try_get("name").map_err(|e| e.to_string())?,
-                email: row.try_get("email").map_err(|e| e.to_string())?,
-                imap_server: row.try_get("imap_server").map_err(|e| e.to_string())?,
-                imap_port: imap_port as u16,
-                smtp_server: row.try_get("smtp_server").map_err(|e| e.to_string())?,
-                smtp_port: smtp_port as u16,
-                username: row.try_get("username").map_err(|e| e.to_string())?,
-                password: String::new(),
-            });
+            accounts.push(account_from_row(row)?);
         }
 
         Ok(accounts)
+    }
+
+    pub async fn get_account_by_id(&self, id: &str) -> Result<Option<crate::models::Account>, String> {
+        let q = "SELECT id, name, email, imap_server, imap_port, smtp_server, smtp_port, username FROM accounts WHERE id = ?";
+
+        let row = sqlx::query(q)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        row.map(account_from_row).transpose()
     }
 
     pub async fn delete_account(&self, id: &str) -> Result<(), String> {
@@ -385,7 +408,7 @@ impl Db {
 
     pub async fn get_emails_by_folder(&self, account_id: &str, folder: &str) -> Result<Vec<crate::models::Email>, String> {
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, NULL AS body_text, NULL AS body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE account_id = ? AND folder = ? ORDER BY timestamp DESC"
         )
             .bind(account_id)
             .bind(folder)
@@ -395,25 +418,21 @@ impl Db {
 
         let mut emails = Vec::new();
         for row in rows {
-            emails.push(crate::models::Email {
-                id: row.try_get("id").map_err(|e| e.to_string())?,
-                account_id: row.try_get("account_id").map_err(|e| e.to_string())?,
-                folder: row.try_get("folder").map_err(|e| e.to_string())?,
-                uid: row.try_get::<i32, _>("uid").map_err(|e| e.to_string())? as u32,
-                sender: row.try_get("sender").map_err(|e| e.to_string())?,
-                sender_email: row.try_get("sender_email").map_err(|e| e.to_string())?,
-                recipient: row.try_get("recipient").unwrap_or_default(),
-                subject: row.try_get("subject").map_err(|e| e.to_string())?,
-                preview: row.try_get("preview").map_err(|e| e.to_string())?,
-                body_text: row.try_get("body_text").map_err(|e| e.to_string())?,
-                body_html: row.try_get("body_html").map_err(|e| e.to_string())?,
-                timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
-                read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
-                starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
-                has_attachments: row.try_get::<bool, _>("has_attachments").unwrap_or(false),
-            });
+            emails.push(email_from_row(row)?);
         }
         Ok(emails)
+    }
+
+    pub async fn get_email_by_id(&self, id: &str) -> Result<Option<crate::models::Email>, String> {
+        let row = sqlx::query(
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        row.map(email_from_row).transpose()
     }
 
     pub async fn mark_email_read(&self, id: &str, read: bool) -> Result<(), String> {
@@ -450,7 +469,7 @@ impl Db {
     pub async fn search_emails(&self, account_id: &str, folder: &str, query: &str) -> Result<Vec<crate::models::Email>, String> {
         let pattern = format!("%{}%", query);
         let rows = sqlx::query(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments \
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, NULL AS body_text, NULL AS body_html, timestamp, is_read, is_starred, has_attachments \
              FROM emails \
              WHERE account_id = ? AND folder = ? \
                AND (subject LIKE ? OR sender LIKE ? OR body_text LIKE ?) \
@@ -467,23 +486,7 @@ impl Db {
 
         let mut emails = Vec::new();
         for row in rows {
-            emails.push(crate::models::Email {
-                id: row.try_get("id").map_err(|e| e.to_string())?,
-                account_id: row.try_get("account_id").map_err(|e| e.to_string())?,
-                folder: row.try_get("folder").map_err(|e| e.to_string())?,
-                uid: row.try_get::<i32, _>("uid").map_err(|e| e.to_string())? as u32,
-                sender: row.try_get("sender").map_err(|e| e.to_string())?,
-                sender_email: row.try_get("sender_email").map_err(|e| e.to_string())?,
-                recipient: row.try_get("recipient").unwrap_or_default(),
-                subject: row.try_get("subject").map_err(|e| e.to_string())?,
-                preview: row.try_get("preview").map_err(|e| e.to_string())?,
-                body_text: row.try_get("body_text").map_err(|e| e.to_string())?,
-                body_html: row.try_get("body_html").map_err(|e| e.to_string())?,
-                timestamp: row.try_get("timestamp").map_err(|e| e.to_string())?,
-                read: row.try_get::<bool, _>("is_read").map_err(|e| e.to_string())?,
-                starred: row.try_get::<bool, _>("is_starred").unwrap_or(false),
-                has_attachments: row.try_get::<bool, _>("has_attachments").unwrap_or(false),
-            });
+            emails.push(email_from_row(row)?);
         }
         Ok(emails)
     }
@@ -491,7 +494,7 @@ impl Db {
     pub async fn query_emails(&self, query: &crate::models::EmailQuery) -> Result<Vec<crate::models::Email>, String> {
         let limit = query.limit.clamp(1, 200) as i64;
         let mut sql = String::from(
-            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, body_text, body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE 1 = 1",
+            "SELECT id, account_id, folder, uid, sender, sender_email, recipient, subject, preview, NULL AS body_text, NULL AS body_html, timestamp, is_read, is_starred, has_attachments FROM emails WHERE 1 = 1",
         );
 
         if !query.account_ids.is_empty() {
@@ -632,6 +635,34 @@ impl Db {
         })
     }
 
+    pub async fn list_security_audit_logs(&self, limit: i64) -> Result<Vec<crate::models::SecurityAuditLog>, String> {
+        let rows = sqlx::query(
+            "SELECT id, event_type, severity, email_id, account_id, target, decision, created_at \
+             FROM security_audit_logs \
+             ORDER BY datetime(created_at) DESC, rowid DESC \
+             LIMIT ?"
+        )
+        .bind(limit.clamp(1, 100))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(crate::models::SecurityAuditLog {
+                    id: row.try_get("id").map_err(|e| e.to_string())?,
+                    event_type: row.try_get("event_type").map_err(|e| e.to_string())?,
+                    severity: row.try_get("severity").map_err(|e| e.to_string())?,
+                    email_id: row.try_get("email_id").map_err(|e| e.to_string())?,
+                    account_id: row.try_get("account_id").map_err(|e| e.to_string())?,
+                    target: row.try_get("target").map_err(|e| e.to_string())?,
+                    decision: row.try_get("decision").map_err(|e| e.to_string())?,
+                    created_at: row.try_get("created_at").map_err(|e| e.to_string())?,
+                })
+            })
+            .collect()
+    }
+
     pub async fn get_signatures(&self) -> Result<Vec<crate::models::Signature>, String> {
         let rows = sqlx::query("SELECT id, name, content, is_default FROM signatures ORDER BY name ASC")
             .fetch_all(&self.pool)
@@ -745,6 +776,22 @@ fn sqlite_connect_options(db_path: PathBuf) -> SqliteConnectOptions {
     SqliteConnectOptions::new().filename(db_path)
 }
 
+fn account_from_row(row: SqliteRow) -> Result<crate::models::Account, String> {
+    let imap_port: i32 = row.try_get("imap_port").map_err(|e| e.to_string())?;
+    let smtp_port: i32 = row.try_get("smtp_port").map_err(|e| e.to_string())?;
+    Ok(crate::models::Account {
+        id: row.try_get("id").map_err(|e| e.to_string())?,
+        name: row.try_get("name").map_err(|e| e.to_string())?,
+        email: row.try_get("email").map_err(|e| e.to_string())?,
+        imap_server: row.try_get("imap_server").map_err(|e| e.to_string())?,
+        imap_port: imap_port as u16,
+        smtp_server: row.try_get("smtp_server").map_err(|e| e.to_string())?,
+        smtp_port: smtp_port as u16,
+        username: row.try_get("username").map_err(|e| e.to_string())?,
+        password: String::new(),
+    })
+}
+
 fn email_from_row(row: sqlx::sqlite::SqliteRow) -> Result<crate::models::Email, String> {
     Ok(crate::models::Email {
         id: row.try_get("id").map_err(|e| e.to_string())?,
@@ -800,6 +847,16 @@ mod tests {
             .fetch_all(&db.pool)
             .await
             .expect("account table info query failed");
+        rows.into_iter()
+            .map(|row| row.try_get::<String, _>("name").unwrap())
+            .collect()
+    }
+
+    async fn email_index_names(db: &Db) -> Vec<String> {
+        let rows = sqlx::query("PRAGMA index_list(emails)")
+            .fetch_all(&db.pool)
+            .await
+            .expect("email index list query failed");
         rows.into_iter()
             .map(|row| row.try_get::<String, _>("name").unwrap())
             .collect()
@@ -956,6 +1013,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_email_query_indexes_exist_on_new_database() {
+        let (db, _tmp) = setup_db().await;
+
+        let indexes = email_index_names(&db).await;
+
+        assert!(indexes.contains(&"emails_account_folder_timestamp_idx".to_string()));
+        assert!(indexes.contains(&"emails_starred_timestamp_idx".to_string()));
+    }
+
+    #[tokio::test]
     async fn test_new_database_accounts_table_has_no_password_column() {
         let (db, _tmp) = setup_db().await;
 
@@ -984,10 +1051,11 @@ mod tests {
             .await
             .expect("schema migration rows query failed");
 
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].try_get::<i64, _>("version").unwrap(), 1);
         assert_eq!(rows[1].try_get::<i64, _>("version").unwrap(), 2);
-        assert_eq!(rows[2].try_get::<i64, _>("version").unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(rows[2].try_get::<i64, _>("version").unwrap(), 3);
+        assert_eq!(rows[3].try_get::<i64, _>("version").unwrap(), CURRENT_SCHEMA_VERSION);
     }
 
     #[tokio::test]
@@ -1041,6 +1109,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_account_by_id_returns_matching_account() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+        db.insert_account(&Account {
+            id: "acc-2".to_string(),
+            name: "Other User".to_string(),
+            email: "other@example.com".to_string(),
+            imap_server: "imap.other.example.com".to_string(),
+            imap_port: 993,
+            smtp_server: "smtp.other.example.com".to_string(),
+            smtp_port: 465,
+            username: "other@example.com".to_string(),
+            password: "secret".to_string(),
+        })
+        .await
+        .unwrap();
+
+        let account = db
+            .get_account_by_id("acc-2")
+            .await
+            .unwrap()
+            .expect("account should exist");
+
+        assert_eq!(account.id, "acc-2");
+        assert_eq!(account.email, "other@example.com");
+        assert_eq!(account.password, "");
+    }
+
+    #[tokio::test]
+    async fn test_get_account_by_id_returns_none_for_missing_account() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+
+        let account = db.get_account_by_id("missing").await.unwrap();
+
+        assert!(account.is_none());
+    }
+
+    #[tokio::test]
     async fn test_delete_account() {
         let (db, _tmp) = setup_db().await;
         let acc = test_account();
@@ -1085,6 +1192,35 @@ mod tests {
         let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
         assert_eq!(emails.len(), 1);
         assert_eq!(emails[0].subject, "Updated Subject");
+    }
+
+    #[tokio::test]
+    async fn test_folder_query_omits_email_body() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+        db.upsert_email(&test_email("acc-1", 1)).await.unwrap();
+
+        let emails = db.get_emails_by_folder("acc-1", "inbox").await.unwrap();
+
+        assert_eq!(emails.len(), 1);
+        assert_eq!(emails[0].body_text, None);
+        assert_eq!(emails[0].body_html, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_email_by_id_returns_body() {
+        let (db, _tmp) = setup_db().await;
+        db.insert_account(&test_account()).await.unwrap();
+        db.upsert_email(&test_email("acc-1", 1)).await.unwrap();
+
+        let email = db
+            .get_email_by_id("email-1")
+            .await
+            .unwrap()
+            .expect("email should exist");
+
+        assert_eq!(email.body_text.as_deref(), Some("Hello"));
+        assert_eq!(email.body_html.as_deref(), Some("<p>Hello</p>"));
     }
 
     #[tokio::test]
@@ -1311,6 +1447,38 @@ mod tests {
         assert_eq!(inserted.decision, "opened");
         assert!(!inserted.id.is_empty());
         assert!(!inserted.created_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_security_audit_logs_returns_recent_first() {
+        let (db, _tmp) = setup_db().await;
+
+        db.insert_security_audit_log(&NewSecurityAuditLog {
+            event_type: "external_link".to_string(),
+            severity: "medium".to_string(),
+            email_id: Some("email-1".to_string()),
+            account_id: Some("acc-1".to_string()),
+            target: "https://first.example.com".to_string(),
+            decision: "opened".to_string(),
+        })
+        .await
+        .unwrap();
+        db.insert_security_audit_log(&NewSecurityAuditLog {
+            event_type: "attachment_save".to_string(),
+            severity: "high".to_string(),
+            email_id: Some("email-2".to_string()),
+            account_id: Some("acc-1".to_string()),
+            target: "invoice.exe".to_string(),
+            decision: "cancelled".to_string(),
+        })
+        .await
+        .unwrap();
+
+        let logs = db.list_security_audit_logs(1).await.unwrap();
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].event_type, "attachment_save");
+        assert_eq!(logs[0].target, "invoice.exe");
     }
 
     #[tokio::test]
