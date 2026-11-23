@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local credentials and mail data
+.env
+.env.*
+!.env.example
+mailmail.sqlite
+mailmail.sqlite-*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
