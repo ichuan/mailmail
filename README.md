@@ -2,6 +2,8 @@
 
 A minimalistic, privacy-focused native Windows 11 email client built with Tauri v2, Rust, and React.
 
+![MailMail inbox and message preview on Windows](docs/mailmail-1.webp)
+
 ## Environment Requirements
 
 - **OS**: Windows 11 (exclusively tested on Windows/MSVC).
